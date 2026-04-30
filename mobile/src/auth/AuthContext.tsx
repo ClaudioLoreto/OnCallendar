@@ -1,0 +1,79 @@
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import apiClient, { setAuthToken } from '../api/apiClient';
+
+export type AuthUser = {
+  userId: string;
+  email: string;
+  fullName: string;
+  role: 'SuperAdmin' | 'Medico';
+  tenantId: string | null;
+};
+
+type AuthState = {
+  user: AuthUser | null;
+  token: string | null;
+  loading: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
+};
+
+const STORAGE_KEY = 'oncallendar.auth';
+const AuthCtx = createContext<AuthState | null>(null);
+
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as { token: string; user: AuthUser };
+          setAuthToken(parsed.token);
+          setToken(parsed.token);
+          setUser(parsed.user);
+        }
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const login = useCallback(async (email: string, password: string) => {
+    const { data } = await apiClient.post('/api/auth/login', { email, password });
+    const u: AuthUser = {
+      userId: data.userId,
+      email: data.email,
+      fullName: data.fullName,
+      role: data.role,
+      tenantId: data.tenantId,
+    };
+    setAuthToken(data.token);
+    setToken(data.token);
+    setUser(u);
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ token: data.token, user: u }));
+  }, []);
+
+  const logout = useCallback(async () => {
+    setAuthToken(null);
+    setToken(null);
+    setUser(null);
+    await AsyncStorage.removeItem(STORAGE_KEY);
+  }, []);
+
+  const value = useMemo<AuthState>(
+    () => ({ user, token, loading, login, logout }),
+    [user, token, loading, login, logout],
+  );
+
+  return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
+};
+
+export const useAuth = (): AuthState => {
+  const ctx = useContext(AuthCtx);
+  if (!ctx) throw new Error('useAuth must be inside AuthProvider');
+  return ctx;
+};

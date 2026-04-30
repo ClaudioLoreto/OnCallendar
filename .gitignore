@@ -1,0 +1,67 @@
+# --- OS / Editor ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vs/
+*.user
+*.suo
+
+# --- Secrets / env ---
+*.env
+*.env.local
+*.env.*.local
+!.env.example
+appsettings.Development.json
+appsettings.Production.json
+appsettings.Local.json
+secrets.json
+
+# --- .NET ---
+bin/
+obj/
+out/
+publish/
+*.dll
+*.exe
+*.pdb
+*.cache
+*.log
+TestResults/
+.vs/
+artifacts/
+project.lock.json
+*.binlog
+backend/src/OnCallendar.Api/wwwroot/uploads/
+
+# --- Node / Expo ---
+node_modules/
+.expo/
+.expo-shared/
+dist/
+web-build/
+*.tsbuildinfo
+.metro-health-check*
+npm-debug.log*
+yarn-error.log*
+yarn-debug.log*
+.pnpm-debug.log*
+
+# --- Coverage / Tooling ---
+coverage/
+*.lcov
+.nyc_output/
+
+# --- LocalDB / dev DB files ---
+*.mdf
+*.ldf
+*.bak
+
+# --- Memory / chat agent state ---
+.vscode/.copilot/
+
+# --- Misc tmp ---
+tmp/
+.tmp/
+*.tmp

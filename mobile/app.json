@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "OnCallendar",
+    "slug": "oncallendar",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#F7F8F0"
+    },
+    "ios": { "supportsTablet": true },
+    "android": { "package": "local.oncallendar" },
+    "extra": {
+      "apiBaseUrl": null
+    }
+  }
+}
