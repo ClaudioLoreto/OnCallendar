@@ -10,6 +10,10 @@ using OnCallendar.Infrastructure.Persistence;
 
 namespace OnCallendar.Api.Controllers;
 
+/// <summary>
+/// Richieste di scambio/cessione/presa-da-bacheca del Medico di Turno.
+/// Il Medico Reperibile non è oggetto di swap.
+/// </summary>
 [ApiController]
 [Route("api/swaps")]
 [Authorize]
@@ -27,32 +31,45 @@ public sealed class SwapRequestsController : ControllerBase
         _db = db; _user = user; _rules = rules; _audit = audit;
     }
 
+    public sealed record ShiftBriefDto(
+        Guid Id, string Date, string Code,
+        DateTime StartUtc, DateTime EndUtc);
+
     public sealed record SwapDto(
         Guid Id, SwapRequestType Type, SwapRequestStatus Status,
         Guid InitiatorId, string InitiatorName,
-        Guid InitiatorShiftId, DateTime InitiatorShiftStart, DateTime InitiatorShiftEnd,
+        ShiftBriefDto InitiatorShift,
         Guid? CounterpartId, string? CounterpartName,
-        Guid? CounterpartShiftId, DateTime? CounterpartShiftStart, DateTime? CounterpartShiftEnd,
+        ShiftBriefDto? CounterpartShift,
         string? Message, string? ResolutionReason,
         DateTime CreatedAtUtc, DateTime? ResolvedAtUtc);
+
+    private static ShiftBriefDto Brief(Shift s) => new(
+        s.Id, s.Date.ToString("yyyy-MM-dd"), s.Code.ToString(), s.StartUtc, s.EndUtc);
 
     private static SwapDto Map(SwapRequest r) => new(
         r.Id, r.Type, r.Status,
         r.InitiatorMedicoId, $"{r.InitiatorMedico.FirstName} {r.InitiatorMedico.LastName}",
-        r.InitiatorShiftId, r.InitiatorShift.StartUtc, r.InitiatorShift.EndUtc,
+        Brief(r.InitiatorShift),
         r.CounterpartMedicoId,
         r.CounterpartMedico is null ? null : $"{r.CounterpartMedico.FirstName} {r.CounterpartMedico.LastName}",
-        r.CounterpartShiftId, r.CounterpartShift?.StartUtc, r.CounterpartShift?.EndUtc,
+        r.CounterpartShift is null ? null : Brief(r.CounterpartShift),
         r.Message, r.ResolutionReason, r.CreatedAtUtc, r.ResolvedAtUtc);
 
-    // -------------------- LIST --------------------
+    private IQueryable<SwapRequest> LoadSwaps() => _db.SwapRequests
+        .Include(r => r.InitiatorMedico)
+        .Include(r => r.CounterpartMedico)
+        .Include(r => r.InitiatorShift)
+        .Include(r => r.CounterpartShift);
 
+    // ---------- LIST ----------
     [HttpGet("incoming")]
     public async Task<ActionResult<IEnumerable<SwapDto>>> Incoming()
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
         var list = await LoadSwaps()
             .Where(r => r.CounterpartMedicoId == uid && r.Status == SwapRequestStatus.Pending)
+            .OrderByDescending(r => r.CreatedAtUtc)
             .ToListAsync();
         return Ok(list.Select(Map));
     }
@@ -64,47 +81,45 @@ public sealed class SwapRequestsController : ControllerBase
         var list = await LoadSwaps()
             .Where(r => r.InitiatorMedicoId == uid)
             .OrderByDescending(r => r.CreatedAtUtc)
-            .Take(50)
+            .Take(100)
             .ToListAsync();
         return Ok(list.Select(Map));
     }
 
-    private IQueryable<SwapRequest> LoadSwaps() => _db.SwapRequests
-        .Include(r => r.InitiatorMedico)
-        .Include(r => r.CounterpartMedico)
-        .Include(r => r.InitiatorShift)
-        .Include(r => r.CounterpartShift);
+    [HttpGet("history")]
+    public async Task<ActionResult<IEnumerable<SwapDto>>> History()
+    {
+        if (_user.UserId is not Guid uid) return Unauthorized();
+        var list = await LoadSwaps()
+            .Where(r => (r.InitiatorMedicoId == uid || r.CounterpartMedicoId == uid))
+            .OrderByDescending(r => r.CreatedAtUtc)
+            .Take(200)
+            .ToListAsync();
+        return Ok(list.Select(Map));
+    }
 
-    // -------------------- CREATE --------------------
-
+    // ---------- CREATE ----------
     public sealed record CreateGiveawayRequest(Guid ShiftId, Guid ToMedicoId, string? Message);
 
-    /// <summary>Cessione diretta del proprio turno a un collega.</summary>
     [HttpPost("giveaway")]
     public async Task<ActionResult<SwapDto>> CreateGiveaway([FromBody] CreateGiveawayRequest req)
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
 
-        var shift = await _db.Shifts
-            .Include(s => s.Assignments).ThenInclude(a => a.Medico)
-            .FirstOrDefaultAsync(s => s.Id == req.ShiftId);
+        var shift = await _db.Shifts.FirstOrDefaultAsync(s => s.Id == req.ShiftId);
         if (shift is null) return NotFound(new { error = "Turno inesistente." });
-
-        var current = shift.Assignments.FirstOrDefault(a => a.IsCurrent && !a.IsDeleted);
-        if (current?.MedicoId != uid)
-            return Forbid();
+        if (shift.MedicoTurnoId != uid) return Forbid();
+        if (shift.StartUtc <= DateTime.UtcNow)
+            return BadRequest(new { error = "Turno già iniziato." });
 
         var to = await _db.Users.FirstOrDefaultAsync(u => u.Id == req.ToMedicoId);
         if (to is null) return BadRequest(new { error = "Destinatario inesistente." });
         if (to.Id == uid) return BadRequest(new { error = "Non puoi cedere il turno a te stesso." });
 
-        // Regola: max 1 richiesta pending per turno (di qualunque tipo) iniziata da me
         var alreadyPending = await _db.SwapRequests.AnyAsync(r =>
-            r.InitiatorMedicoId == uid &&
-            r.InitiatorShiftId == shift.Id &&
-            r.Status == SwapRequestStatus.Pending);
+            r.InitiatorShiftId == shift.Id && r.Status == SwapRequestStatus.Pending);
         if (alreadyPending)
-            return Conflict(new { error = "Hai già una richiesta di scambio in sospeso per questo turno." });
+            return Conflict(new { error = "Esiste già una richiesta in sospeso per questo turno." });
 
         var swap = new SwapRequest
         {
@@ -127,23 +142,24 @@ public sealed class SwapRequestsController : ControllerBase
 
     public sealed record CreateSwapRequest(Guid MyShiftId, Guid OtherShiftId, string? Message);
 
-    /// <summary>Scambio bilaterale: io offro myShift in cambio di otherShift.</summary>
     [HttpPost("swap")]
     public async Task<ActionResult<SwapDto>> CreateSwap([FromBody] CreateSwapRequest req)
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
 
-        var mine = await _db.Shifts.Include(s => s.Assignments)
-            .FirstOrDefaultAsync(s => s.Id == req.MyShiftId);
-        var other = await _db.Shifts.Include(s => s.Assignments).ThenInclude(a => a.Medico)
-            .FirstOrDefaultAsync(s => s.Id == req.OtherShiftId);
+        var mine  = await _db.Shifts.FirstOrDefaultAsync(s => s.Id == req.MyShiftId);
+        var other = await _db.Shifts.FirstOrDefaultAsync(s => s.Id == req.OtherShiftId);
         if (mine is null || other is null) return NotFound();
+        if (mine.MedicoTurnoId != uid) return Forbid();
+        if (other.MedicoTurnoId is null) return BadRequest(new { error = "Turno destinazione non assegnato." });
+        if (other.MedicoTurnoId == uid) return BadRequest(new { error = "Non puoi scambiare con te stesso." });
 
-        var mineCurr  = mine.Assignments.FirstOrDefault(a => a.IsCurrent && !a.IsDeleted);
-        var otherCurr = other.Assignments.FirstOrDefault(a => a.IsCurrent && !a.IsDeleted);
-        if (mineCurr?.MedicoId != uid) return Forbid();
-        if (otherCurr is null) return BadRequest(new { error = "Turno di destinazione non assegnato." });
-        if (otherCurr.MedicoId == uid) return BadRequest(new { error = "Non puoi scambiare con te stesso." });
+        var alreadyPending = await _db.SwapRequests.AnyAsync(r =>
+            (r.InitiatorShiftId == mine.Id || r.CounterpartShiftId == mine.Id ||
+             r.InitiatorShiftId == other.Id || r.CounterpartShiftId == other.Id)
+            && r.Status == SwapRequestStatus.Pending);
+        if (alreadyPending)
+            return Conflict(new { error = "Esiste già una richiesta in sospeso per uno dei due turni." });
 
         var swap = new SwapRequest
         {
@@ -152,65 +168,56 @@ public sealed class SwapRequestsController : ControllerBase
             Status = SwapRequestStatus.Pending,
             InitiatorMedicoId = uid,
             InitiatorShiftId = mine.Id,
-            CounterpartMedicoId = otherCurr.MedicoId,
+            CounterpartMedicoId = other.MedicoTurnoId,
             CounterpartShiftId = other.Id,
             Message = req.Message,
             CreatedAtUtc = DateTime.UtcNow,
         };
         _db.SwapRequests.Add(swap);
         _audit.Log("SwapRequest", swap.Id, "SwapCreated", mine.TenantId,
-            newValues: new { swap.InitiatorShiftId, swap.CounterpartShiftId, swap.CounterpartMedicoId });
+            newValues: new { swap.InitiatorShiftId, swap.CounterpartShiftId });
 
         await _db.SaveChangesAsync();
         return Ok(await ReloadDto(swap.Id));
     }
 
-    /// <summary>Pesco un turno dalla bacheca: il Rule Engine valida e auto-approva.</summary>
     [HttpPost("pick/{shiftId:guid}")]
     public async Task<ActionResult<SwapDto>> PickFromBoard(Guid shiftId)
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
-
-        var shift = await _db.Shifts
-            .Include(s => s.Assignments).ThenInclude(a => a.Medico)
-            .FirstOrDefaultAsync(s => s.Id == shiftId);
+        var shift = await _db.Shifts.FirstOrDefaultAsync(s => s.Id == shiftId);
         if (shift is null) return NotFound();
-        if (shift.Status != ShiftStatus.OnBoard)
-            return BadRequest(new { error = "Turno non in bacheca." });
-
-        var current = shift.Assignments.First(a => a.IsCurrent && !a.IsDeleted);
-        if (current.MedicoId == uid) return BadRequest(new { error = "Sei già tu l'assegnatario." });
+        if (shift.Status != ShiftStatus.OnBoard) return BadRequest(new { error = "Turno non in bacheca." });
+        if (shift.MedicoTurnoId is null) return BadRequest(new { error = "Turno scoperto." });
+        if (shift.MedicoTurnoId == uid) return BadRequest(new { error = "Sei già tu l'assegnatario." });
 
         var swap = new SwapRequest
         {
             TenantId = shift.TenantId,
             Type = SwapRequestType.PickFromBoard,
             Status = SwapRequestStatus.Pending,
-            InitiatorMedicoId = current.MedicoId,   // chi cede (proprietario originale)
+            InitiatorMedicoId = shift.MedicoTurnoId.Value,
             InitiatorShiftId = shift.Id,
-            CounterpartMedicoId = uid,              // chi prende
+            CounterpartMedicoId = uid,
             CreatedAtUtc = DateTime.UtcNow,
         };
         _db.SwapRequests.Add(swap);
         await _db.SaveChangesAsync();
 
-        // Pick = auto-accept lato destinatario
         return await ResolveAcceptance(swap.Id);
     }
 
-    // -------------------- ACCEPT / REJECT --------------------
-
+    // ---------- ACCEPT / REJECT / CANCEL ----------
     [HttpPost("{id:guid}/accept")]
-    public async Task<ActionResult<SwapDto>> Accept(Guid id) => await ResolveAcceptance(id);
+    public Task<ActionResult<SwapDto>> Accept(Guid id) => ResolveAcceptance(id);
+
+    public sealed record RejectBody(string? Reason);
 
     [HttpPost("{id:guid}/reject")]
     public async Task<ActionResult<SwapDto>> Reject(Guid id, [FromBody] RejectBody? body)
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
-        var swap = await _db.SwapRequests
-            .Include(r => r.InitiatorMedico).Include(r => r.CounterpartMedico)
-            .Include(r => r.InitiatorShift).Include(r => r.CounterpartShift)
-            .FirstOrDefaultAsync(r => r.Id == id);
+        var swap = await LoadSwaps().FirstOrDefaultAsync(r => r.Id == id);
         if (swap is null) return NotFound();
         if (swap.CounterpartMedicoId != uid) return Forbid();
         if (swap.Status != SwapRequestStatus.Pending)
@@ -223,16 +230,12 @@ public sealed class SwapRequestsController : ControllerBase
         await _db.SaveChangesAsync();
         return Ok(Map(swap));
     }
-    public sealed record RejectBody(string? Reason);
 
     [HttpPost("{id:guid}/cancel")]
     public async Task<ActionResult<SwapDto>> Cancel(Guid id)
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
-        var swap = await _db.SwapRequests
-            .Include(r => r.InitiatorMedico).Include(r => r.CounterpartMedico)
-            .Include(r => r.InitiatorShift).Include(r => r.CounterpartShift)
-            .FirstOrDefaultAsync(r => r.Id == id);
+        var swap = await LoadSwaps().FirstOrDefaultAsync(r => r.Id == id);
         if (swap is null) return NotFound();
         if (swap.InitiatorMedicoId != uid) return Forbid();
         if (swap.Status != SwapRequestStatus.Pending)
@@ -245,26 +248,18 @@ public sealed class SwapRequestsController : ControllerBase
         return Ok(Map(swap));
     }
 
-    // -------------------- CORE: validazione + applicazione --------------------
-
+    // ---------- CORE ----------
     private async Task<ActionResult<SwapDto>> ResolveAcceptance(Guid swapId)
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
-
-        var swap = await _db.SwapRequests
-            .Include(r => r.InitiatorMedico)
-            .Include(r => r.CounterpartMedico)
-            .Include(r => r.InitiatorShift).ThenInclude(s => s.Assignments)
-            .Include(r => r.CounterpartShift).ThenInclude(s => s!.Assignments)
-            .FirstOrDefaultAsync(r => r.Id == swapId);
+        var swap = await LoadSwaps().FirstOrDefaultAsync(r => r.Id == swapId);
         if (swap is null) return NotFound();
         if (swap.CounterpartMedicoId != uid) return Forbid();
         if (swap.Status != SwapRequestStatus.Pending)
             return BadRequest(new { error = "Richiesta non più pendente." });
 
-        // Carico i turni "vicini" del/i medico/i nei prossimi 7gg attorno al/i turno/i scambiato/i
         var window = TimeSpan.FromDays(7);
-        var initiatorId = swap.InitiatorMedicoId;
+        var initiatorId   = swap.InitiatorMedicoId;
         var counterpartId = swap.CounterpartMedicoId!.Value;
 
         var minStart = swap.InitiatorShift.StartUtc - window;
@@ -276,7 +271,7 @@ public sealed class SwapRequestsController : ControllerBase
         }
 
         var counterpartShifts = await _db.Shifts
-            .Where(s => s.Assignments.Any(a => a.IsCurrent && !a.IsDeleted && a.MedicoId == counterpartId)
+            .Where(s => s.MedicoTurnoId == counterpartId
                         && s.StartUtc < maxEnd && s.EndUtc > minStart
                         && s.Status != ShiftStatus.Cancelled)
             .ToListAsync();
@@ -286,7 +281,7 @@ public sealed class SwapRequestsController : ControllerBase
         if (swap.Type == SwapRequestType.Swap && swap.CounterpartShift is not null)
         {
             var initiatorShifts = await _db.Shifts
-                .Where(s => s.Assignments.Any(a => a.IsCurrent && !a.IsDeleted && a.MedicoId == initiatorId)
+                .Where(s => s.MedicoTurnoId == initiatorId
                             && s.StartUtc < maxEnd && s.EndUtc > minStart
                             && s.Status != ShiftStatus.Cancelled)
                 .ToListAsync();
@@ -297,7 +292,6 @@ public sealed class SwapRequestsController : ControllerBase
         }
         else
         {
-            // Giveaway o PickFromBoard: trasferisco InitiatorShift al counterpart
             result = _rules.ValidateGiveaway(
                 swap.InitiatorShift, initiatorId, counterpartId, counterpartShifts);
         }
@@ -308,7 +302,6 @@ public sealed class SwapRequestsController : ControllerBase
             swap.ResolvedAtUtc = DateTime.UtcNow;
             swap.ResolutionReason = string.Join(" | ",
                 result.Violations.Select(v => $"[{v.Code}] {v.Message}"));
-
             _audit.Log("SwapRequest", swap.Id, "BlockedByRules", swap.TenantId,
                 notes: swap.ResolutionReason);
             await _db.SaveChangesAsync();
@@ -320,21 +313,30 @@ public sealed class SwapRequestsController : ControllerBase
             });
         }
 
-        // ------- APPLICAZIONE ATOMICA -------
         await using var tx = await _db.Database.BeginTransactionAsync();
 
-        ReassignShift(swap.InitiatorShift, fromMedicoId: initiatorId, toMedicoId: counterpartId, swap.Id);
-
-        if (swap.Type == SwapRequestType.Swap && swap.CounterpartShift is not null)
-            ReassignShift(swap.CounterpartShift, fromMedicoId: counterpartId, toMedicoId: initiatorId, swap.Id);
-
-        // Se il turno era OnBoard riportalo a Assigned
+        // Reassign initiator shift → counterpart
+        var oldInitiatorMedico = swap.InitiatorShift.MedicoTurnoId;
+        swap.InitiatorShift.MedicoTurnoId = counterpartId;
+        swap.InitiatorShift.UpdatedAtUtc = DateTime.UtcNow;
         if (swap.InitiatorShift.Status == ShiftStatus.OnBoard)
             swap.InitiatorShift.Status = ShiftStatus.Assigned;
+        _audit.Log("Shift", swap.InitiatorShift.Id, "Reassigned", swap.TenantId,
+            oldValues: new { MedicoTurnoId = oldInitiatorMedico },
+            newValues: new { MedicoTurnoId = counterpartId, SwapId = swap.Id });
+
+        if (swap.Type == SwapRequestType.Swap && swap.CounterpartShift is not null)
+        {
+            var oldCounterMedico = swap.CounterpartShift.MedicoTurnoId;
+            swap.CounterpartShift.MedicoTurnoId = initiatorId;
+            swap.CounterpartShift.UpdatedAtUtc = DateTime.UtcNow;
+            _audit.Log("Shift", swap.CounterpartShift.Id, "Reassigned", swap.TenantId,
+                oldValues: new { MedicoTurnoId = oldCounterMedico },
+                newValues: new { MedicoTurnoId = initiatorId, SwapId = swap.Id });
+        }
 
         swap.Status = SwapRequestStatus.AutoApproved;
         swap.ResolvedAtUtc = DateTime.UtcNow;
-
         _audit.Log("SwapRequest", swap.Id, "AutoApproved", swap.TenantId,
             newValues: new { swap.Type, swap.InitiatorShiftId, swap.CounterpartShiftId });
 
@@ -342,29 +344,6 @@ public sealed class SwapRequestsController : ControllerBase
         await tx.CommitAsync();
 
         return Ok(await ReloadDto(swap.Id));
-    }
-
-    private void ReassignShift(Shift shift, Guid fromMedicoId, Guid toMedicoId, Guid swapId)
-    {
-        var current = shift.Assignments.FirstOrDefault(a => a.IsCurrent && !a.IsDeleted);
-        if (current is not null)
-        {
-            current.IsCurrent = false;
-            current.UpdatedAtUtc = DateTime.UtcNow;
-        }
-        _db.ShiftAssignments.Add(new ShiftAssignment
-        {
-            TenantId = shift.TenantId,
-            ShiftId = shift.Id,
-            MedicoId = toMedicoId,
-            IsCurrent = true,
-            AssignedAtUtc = DateTime.UtcNow,
-            OriginatingSwapRequestId = swapId,
-            CreatedAtUtc = DateTime.UtcNow,
-        });
-        _audit.Log("ShiftAssignment", shift.Id, "Reassigned", shift.TenantId,
-            oldValues: new { MedicoId = fromMedicoId },
-            newValues: new { MedicoId = toMedicoId, SwapId = swapId });
     }
 
     private async Task<SwapDto> ReloadDto(Guid id)

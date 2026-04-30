@@ -13,6 +13,13 @@
  *
  * OVERRIDE MANUALE:
  * - Imposta in `app.config.ts` (extra.apiBaseUrl) o via env EXPO_PUBLIC_API_BASE_URL.
+ *
+ * GESTIONE 401:
+ * - Quando il backend risponde 401 (token scaduto o invalidato — es. dopo un
+ *   reset DB) viene chiamata l'`onUnauthorized` registrata da AuthContext, che
+ *   svuota lo storage e riporta sulla schermata di login. Questo evita la
+ *   "schermata vuota" che si verificava finché il client tentava di usare un
+ *   JWT vecchio incompatibile col nuovo schema.
  */
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
@@ -61,6 +68,12 @@ export const setAuthToken = (token: string | null) => {
   authToken = token;
 };
 
+let onUnauthorized: (() => void | Promise<void>) | null = null;
+/** Registrato da AuthContext per fare auto-logout su 401. */
+export const setOnUnauthorized = (cb: (() => void | Promise<void>) | null) => {
+  onUnauthorized = cb;
+};
+
 export const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
   timeout: 15_000,
@@ -82,7 +95,8 @@ apiClient.interceptors.request.use((config) => {
 
 apiClient.interceptors.response.use(
   (res) => res,
-  (error: AxiosError) => {
+  async (error: AxiosError) => {
+    const status = error.response?.status;
     if (__DEV__) {
       // eslint-disable-next-line no-console
       console.warn(
@@ -90,8 +104,12 @@ apiClient.interceptors.response.use(
         error.config?.method?.toUpperCase(),
         error.config?.url,
         '→',
-        error.response?.status ?? error.message,
+        status ?? error.message,
       );
+    }
+    // 401 = token mancante/scaduto/non valido → forza logout (fix "schermata vuota")
+    if (status === 401 && onUnauthorized) {
+      try { await onUnauthorized(); } catch { /* ignore */ }
     }
     return Promise.reject(error);
   },

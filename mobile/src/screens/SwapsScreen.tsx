@@ -7,7 +7,8 @@ import {
 } from '../components/ui';
 import AppHeader from '../components/AppHeader';
 import {
-  CalendarApi, DayDto, MedicoDto, SlotDto, SwapDto, SwapsApi, UsersApi, formatRange,
+  CalendarApi, DayDto, MedicoDto, ShiftDto, SwapDto, SwapStatus, SwapsApi, UsersApi,
+  formatDayLong, shiftCodeIcon, shiftCodeShort, shiftCodeTone, swapStatusLabel, swapStatusTone, swapTypeLabel,
 } from '../api/endpoints';
 import { useTheme } from '../theme/ThemeContext';
 import { useI18n } from '../i18n/I18nContext';
@@ -15,9 +16,6 @@ import { useAuth } from '../auth/AuthContext';
 
 type Tab = 'incoming' | 'outgoing';
 type Props = { navigation: { navigate: (route: string) => void } };
-
-const ymd = (d: Date) => d.toISOString().slice(0, 10);
-const parseYmd = (s: string) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, (m ?? 1) - 1, d ?? 1); };
 
 export default function SwapsScreen({ navigation }: Props) {
   const { theme } = useTheme();
@@ -36,8 +34,7 @@ export default function SwapsScreen({ navigation }: Props) {
   const [newOpen, setNewOpen] = useState(false);
   const [days, setDays] = useState<DayDto[]>([]);
   const [colleagues, setColleagues] = useState<MedicoDto[]>([]);
-  const [pickedDate, setPickedDate] = useState<string | null>(null);
-  const [pickedShift, setPickedShift] = useState<SlotDto | null>(null);
+  const [pickedShift, setPickedShift] = useState<ShiftDto | null>(null);
   const [pickedColleague, setPickedColleague] = useState<MedicoDto | null>(null);
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -51,12 +48,18 @@ export default function SwapsScreen({ navigation }: Props) {
   }, []);
 
   useEffect(() => {
-    (async () => { try { await loadLists(); } finally { setLoading(false); } })();
+    (async () => {
+      try { await loadLists(); }
+      catch (e: any) { setError(e?.response?.data?.error ?? e?.message ?? 'Errore'); }
+      finally { setLoading(false); }
+    })();
   }, [loadLists]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    try { await loadLists(); } finally { setRefreshing(false); }
+    try { await loadLists(); }
+    catch (e: any) { setError(e?.response?.data?.error ?? e?.message ?? 'Errore'); }
+    finally { setRefreshing(false); }
   };
 
   const decide = async (id: string, action: 'accept' | 'reject' | 'cancel') => {
@@ -76,11 +79,11 @@ export default function SwapsScreen({ navigation }: Props) {
   // ---- nuova richiesta ----
   const openNew = async () => {
     setNewOpen(true);
-    setPickedDate(null); setPickedShift(null); setPickedColleague(null);
+    setPickedShift(null); setPickedColleague(null);
     setMessage(''); setStepError(null);
     try {
       const today = new Date(); today.setHours(0, 0, 0, 0);
-      const to = new Date(today); to.setDate(to.getDate() + 14);
+      const to = new Date(today); to.setDate(to.getDate() + 30);
       const [d, m] = await Promise.all([CalendarApi.list(today, to), UsersApi.medici()]);
       setDays(d);
       setColleagues(m.filter(x => x.id !== user?.userId));
@@ -89,35 +92,20 @@ export default function SwapsScreen({ navigation }: Props) {
     }
   };
 
-  // Date in cui ho un turno futuro
-  const myDates = useMemo(() => {
-    const set = new Set<string>();
-    const now = new Date();
-    for (const d of days) {
-      for (const s of d.slots) {
-        if (s.isMine && new Date(s.startUtc) > now) set.add(d.dateUtc.slice(0, 10));
-      }
+  // I miei turni futuri (di cui sono medico di turno)
+  const myShifts = useMemo<ShiftDto[]>(() => {
+    const out: ShiftDto[] = [];
+    for (const d of days) for (const s of d.shifts) {
+      if (s.isMineTurno && !s.isPast) out.push(s);
     }
-    return Array.from(set).sort();
+    return out;
   }, [days]);
-
-  const myShiftsOnDate = useMemo(() => {
-    if (!pickedDate) return [];
-    const day = days.find(d => d.dateUtc.slice(0, 10) === pickedDate);
-    if (!day) return [];
-    return day.slots.filter(s => s.isMine && new Date(s.startUtc) > new Date());
-  }, [pickedDate, days]);
-
-  const colleaguesOnPickedShift = useMemo(() => {
-    // Tutti i colleghi tranne me; il backend valida poi se il destinatario è disponibile
-    return colleagues;
-  }, [colleagues]);
 
   const submitNew = async () => {
     if (!pickedShift || !pickedColleague) return;
     setSubmitting(true); setStepError(null);
     try {
-      await SwapsApi.giveaway(pickedShift.shiftId, pickedColleague.id, message || undefined);
+      await SwapsApi.giveaway(pickedShift.id, pickedColleague.id, message || undefined);
       setNewOpen(false);
       await loadLists();
     } catch (e: any) {
@@ -129,16 +117,16 @@ export default function SwapsScreen({ navigation }: Props) {
     }
   };
 
-  const dateLabel = (s: string) => parseYmd(s).toLocaleDateString(locale === 'it' ? 'it-IT' : 'en-GB', {
-    weekday: 'long', day: '2-digit', month: 'long',
-  });
-  const slotLabel = (s: SlotDto) => {
-    const h = new Date(s.startUtc).getHours();
-    return h < 12 ? `${t('calendar.morning')}` : `${t('calendar.night')}`;
-  };
-  const slotIcon = (s: SlotDto) => new Date(s.startUtc).getHours() < 12 ? 'sunny-outline' : 'moon-outline';
-
   const list = tab === 'incoming' ? incoming : outgoing;
+
+  const briefLabel = (s: { date: string; code: string; startUtc: string; endUtc: string }) => {
+    const d = new Date(`${s.date}T00:00:00`);
+    const day = d.toLocaleDateString(locale === 'it' ? 'it-IT' : 'en-GB',
+      { weekday: 'short', day: '2-digit', month: 'short' });
+    const start = new Date(s.startUtc).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+    const end   = new Date(s.endUtc).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+    return `${day} · ${s.code} · ${start} → ${end}`;
+  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }}>
@@ -172,33 +160,34 @@ export default function SwapsScreen({ navigation }: Props) {
             ) : null
           }
           renderItem={({ item }) => {
-            const tone =
-              item.status === 'AutoApproved' ? 'success' :
-              item.status === 'Rejected' ? 'danger' :
-              item.status === 'Cancelled' ? 'neutral' :
-              item.status === 'BlockedByRules' ? 'danger' : 'warning';
             const isIncoming = tab === 'incoming';
             return (
               <Card>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: theme.spacing.s }}>
-                  <Text style={theme.typography.h3}>
-                    {item.type === 'Giveaway' ? 'Cessione' : item.type === 'Swap' ? 'Scambio' : 'Pick bacheca'}
-                  </Text>
-                  <Badge label={item.status} tone={tone as any} />
+                  <Text style={theme.typography.h3}>{swapTypeLabel(item.type)}</Text>
+                  <Badge label={swapStatusLabel(item.status)} tone={swapStatusTone(item.status) as any} />
                 </View>
                 <Text style={theme.typography.body}>
                   {isIncoming ? `Da ${item.initiatorName}` : `A ${item.counterpartName ?? '—'}`}
                 </Text>
-                <Text style={theme.typography.caption}>
-                  Turno: {formatRange(item.initiatorShiftStart, item.initiatorShiftEnd)}
-                </Text>
+                <Text style={theme.typography.caption}>Turno: {briefLabel(item.initiatorShift)}</Text>
+                {item.counterpartShift ? (
+                  <Text style={theme.typography.caption}>
+                    Contropartita: {briefLabel(item.counterpartShift)}
+                  </Text>
+                ) : null}
                 {item.message ? (
                   <Text style={[theme.typography.caption, { fontStyle: 'italic', marginTop: 4 }]}>
                     «{item.message}»
                   </Text>
                 ) : null}
+                {item.resolutionReason ? (
+                  <Text style={[theme.typography.caption, { color: theme.colors.danger, marginTop: 4 }]}>
+                    {item.resolutionReason}
+                  </Text>
+                ) : null}
 
-                {item.status === 'Pending' ? (
+                {item.status === SwapStatus.Pending ? (
                   <View style={{ marginTop: theme.spacing.m, flexDirection: 'row', gap: theme.spacing.s }}>
                     {isIncoming ? (
                       <>
@@ -233,86 +222,54 @@ export default function SwapsScreen({ navigation }: Props) {
         <Button title={t('swaps.new')} icon="add" onPress={openNew} />
       </View>
 
-      {/* Sheet wizard nuova richiesta */}
+      {/* Sheet wizard nuova richiesta (giveaway) */}
       <Sheet visible={newOpen} onClose={() => setNewOpen(false)} title={t('swaps.new')}>
         <ScrollView>
-          {/* Step 1: data */}
           <Text style={[theme.typography.body, { fontWeight: '700', marginBottom: theme.spacing.s }]}>
-            <Icon name="calendar-outline" size={16} color={theme.colors.textPrimary} />  1. Quale giorno?
+            <Icon name="calendar-outline" size={16} color={theme.colors.textPrimary} />  1. Quale turno cedi?
           </Text>
-          {myDates.length === 0 ? (
+          {myShifts.length === 0 ? (
             <View style={{ padding: theme.spacing.m, backgroundColor: theme.colors.surfaceAlt, borderRadius: theme.radius.m, marginBottom: theme.spacing.m }}>
-              <Text style={theme.typography.caption}>Non hai turni futuri da scambiare.</Text>
+              <Text style={theme.typography.caption}>Non hai turni futuri da cedere nei prossimi 30 giorni.</Text>
             </View>
           ) : (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: theme.spacing.m }}>
-              {myDates.map(d => {
-                const active = pickedDate === d;
+            <View style={{ gap: 8, marginBottom: theme.spacing.m }}>
+              {myShifts.map(s => {
+                const active = pickedShift?.id === s.id;
                 return (
                   <TouchableOpacity
-                    key={d}
-                    onPress={() => { setPickedDate(d); setPickedShift(null); }}
+                    key={s.id}
+                    onPress={() => setPickedShift(s)}
                     style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 10,
                       borderWidth: 1,
                       borderColor: active ? theme.colors.primary : theme.colors.border,
                       backgroundColor: active ? theme.colors.accent : theme.colors.surface,
-                      borderRadius: theme.radius.m, paddingHorizontal: 12, paddingVertical: 8,
+                      borderRadius: theme.radius.m, paddingHorizontal: 12, paddingVertical: 10,
                     }}
                   >
-                    <Text style={{ color: active ? theme.colors.primary : theme.colors.textPrimary, fontWeight: active ? '700' : '500' }}>
-                      {dateLabel(d)}
-                    </Text>
+                    <Icon name={shiftCodeIcon(s.code) as any} size={18} color={theme.colors.primary} />
+                    <Badge label={s.code} tone={shiftCodeTone(s.code) as any} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: active ? theme.colors.primary : theme.colors.textPrimary, fontWeight: '600', textTransform: 'capitalize' }}>
+                        {formatDayLong(s.date, locale === 'it' ? 'it-IT' : 'en-GB')}
+                      </Text>
+                      <Text style={theme.typography.caption}>
+                        {shiftCodeShort(s.code)} · {s.startLocal} – {s.endLocal}
+                      </Text>
+                    </View>
                   </TouchableOpacity>
                 );
               })}
             </View>
           )}
 
-          {/* Step 2: turno del giorno */}
-          {pickedDate ? (
-            <>
-              <Text style={[theme.typography.body, { fontWeight: '700', marginBottom: theme.spacing.s }]}>
-                <Icon name="time-outline" size={16} color={theme.colors.textPrimary} />  2. Quale turno?
-              </Text>
-              {myShiftsOnDate.length === 0 ? (
-                <View style={{ padding: theme.spacing.m, backgroundColor: '#FBE3E1', borderRadius: theme.radius.m, marginBottom: theme.spacing.m }}>
-                  <Text style={{ color: theme.colors.danger }}>Impossibile chiedere swap: turno libero in questo giorno.</Text>
-                </View>
-              ) : (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: theme.spacing.m }}>
-                  {myShiftsOnDate.map(s => {
-                    const active = pickedShift?.shiftId === s.shiftId;
-                    return (
-                      <TouchableOpacity
-                        key={s.shiftId}
-                        onPress={() => setPickedShift(s)}
-                        style={{
-                          flexDirection: 'row', alignItems: 'center', gap: 6,
-                          borderWidth: 1,
-                          borderColor: active ? theme.colors.primary : theme.colors.border,
-                          backgroundColor: active ? theme.colors.accent : theme.colors.surface,
-                          borderRadius: theme.radius.m, paddingHorizontal: 12, paddingVertical: 8,
-                        }}
-                      >
-                        <Icon name={slotIcon(s) as any} size={16} color={theme.colors.primary} />
-                        <Text style={{ color: active ? theme.colors.primary : theme.colors.textPrimary, fontWeight: '600' }}>
-                          {slotLabel(s)}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
-            </>
-          ) : null}
-
-          {/* Step 3: collega */}
           {pickedShift ? (
             <>
               <Text style={[theme.typography.body, { fontWeight: '700', marginBottom: theme.spacing.s }]}>
-                <Icon name="people-outline" size={16} color={theme.colors.textPrimary} />  3. A chi cedi?
+                <Icon name="people-outline" size={16} color={theme.colors.textPrimary} />  2. A chi cedi?
               </Text>
-              {colleaguesOnPickedShift.map(m => {
+              {colleagues.map(m => {
                 const active = pickedColleague?.id === m.id;
                 return (
                   <TouchableOpacity
@@ -348,11 +305,10 @@ export default function SwapsScreen({ navigation }: Props) {
             </View>
             <View style={{ flex: 1 }}>
               <Button
-                title={t('common.confirm')}
-                icon="paper-plane-outline"
-                onPress={submitNew}
+                title="Invia"
+                icon="send"
                 loading={submitting}
-                disabled={!pickedShift || !pickedColleague}
+                onPress={submitNew}
               />
             </View>
           </View>

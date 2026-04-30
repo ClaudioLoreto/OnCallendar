@@ -19,29 +19,24 @@ public class ApplicationUser : IdentityUser<Guid>, ISoftDeletable
 
     public UserRole Role { get; set; } = UserRole.Medico;
 
-    /// <summary>Codice fiscale del medico (per audit medico-legale).</summary>
+    /// <summary>
+    /// Numero progressivo del medico nel calendario storico (1..N).
+    /// Permette di mappare il PDF (Medico 1/2/3/4) sull'utente reale.
+    /// </summary>
+    public int? MedicoNumber { get; set; }
+
     public string? FiscalCode { get; set; }
-    /// <summary>Numero iscrizione albo medici.</summary>
     public string? MedicalRegistrationNumber { get; set; }
 
-    /// <summary>Token push Expo per notifiche.</summary>
     public string? ExpoPushToken { get; set; }
-
-    /// <summary>URL avatar (opzionale). Se null, l'app mostra le iniziali.</summary>
     public string? AvatarUrl { get; set; }
-
-    /// <summary>Numero di telefono dell'utente (per OTP/contatto).</summary>
     public string? Phone { get; set; }
 
-    /// <summary>Preferenza lingua: "it" | "en".</summary>
     public string PreferredLanguage { get; set; } = "it";
-
-    /// <summary>Preferenza tema: "light" | "dark" | "system".</summary>
     public string ThemePreference { get; set; } = "system";
 
     public bool IsActive { get; set; } = true;
 
-    // Audit
     public DateTime CreatedAtUtc { get; set; }
     public DateTime? UpdatedAtUtc { get; set; }
 
@@ -49,7 +44,4 @@ public class ApplicationUser : IdentityUser<Guid>, ISoftDeletable
     public bool IsDeleted { get; set; }
     public DateTime? DeletedAtUtc { get; set; }
     public string? DeletedBy { get; set; }
-
-    // Navigation
-    public ICollection<ShiftAssignment> ShiftAssignments { get; set; } = new List<ShiftAssignment>();
 }

@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace OnCallendar.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialCreate : Migration
+    public partial class InitialNavelliSchema : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -57,8 +57,8 @@ namespace OnCallendar.Infrastructure.Migrations
                     Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                     Name = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
                     Slug = table.Column<string>(type: "nvarchar(80)", maxLength: 80, nullable: false),
-                    FiscalCode = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    Address = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    FiscalCode = table.Column<string>(type: "nvarchar(32)", maxLength: 32, nullable: true),
+                    Address = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
                     TimeZoneId = table.Column<string>(type: "nvarchar(80)", maxLength: 80, nullable: false),
                     IsActive = table.Column<bool>(type: "bit", nullable: false),
                     IsDeleted = table.Column<bool>(type: "bit", nullable: false),
@@ -104,9 +104,14 @@ namespace OnCallendar.Infrastructure.Migrations
                     LastName = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
                     TenantId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
                     Role = table.Column<int>(type: "int", nullable: false),
+                    MedicoNumber = table.Column<int>(type: "int", nullable: true),
                     FiscalCode = table.Column<string>(type: "nvarchar(32)", maxLength: 32, nullable: true),
                     MedicalRegistrationNumber = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
                     ExpoPushToken = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: true),
+                    AvatarUrl = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true),
+                    Phone = table.Column<string>(type: "nvarchar(40)", maxLength: 40, nullable: true),
+                    PreferredLanguage = table.Column<string>(type: "nvarchar(8)", maxLength: 8, nullable: false, defaultValue: "it"),
+                    ThemePreference = table.Column<string>(type: "nvarchar(16)", maxLength: 16, nullable: false, defaultValue: "system"),
                     IsActive = table.Column<bool>(type: "bit", nullable: false),
                     CreatedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: false),
                     UpdatedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: true),
@@ -133,36 +138,6 @@ namespace OnCallendar.Infrastructure.Migrations
                     table.PrimaryKey("PK_AspNetUsers", x => x.Id);
                     table.ForeignKey(
                         name: "FK_AspNetUsers_Tenants_TenantId",
-                        column: x => x.TenantId,
-                        principalTable: "Tenants",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "Shifts",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    TenantId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    StartUtc = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    EndUtc = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    Location = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true),
-                    Notes = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
-                    Status = table.Column<int>(type: "int", nullable: false),
-                    IsDeleted = table.Column<bool>(type: "bit", nullable: false),
-                    DeletedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    DeletedBy = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    CreatedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    CreatedBy = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    UpdatedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    UpdatedBy = table.Column<string>(type: "nvarchar(max)", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Shifts", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_Shifts_Tenants_TenantId",
                         column: x => x.TenantId,
                         principalTable: "Tenants",
                         principalColumn: "Id",
@@ -255,6 +230,51 @@ namespace OnCallendar.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "Shifts",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    TenantId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    Date = table.Column<DateOnly>(type: "date", nullable: false),
+                    Code = table.Column<int>(type: "int", nullable: false),
+                    StartUtc = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    EndUtc = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    MedicoTurnoId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    MedicoReperibileId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    Status = table.Column<int>(type: "int", nullable: false),
+                    Notes = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
+                    IsDeleted = table.Column<bool>(type: "bit", nullable: false),
+                    DeletedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    DeletedBy = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    CreatedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    CreatedBy = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    UpdatedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    UpdatedBy = table.Column<string>(type: "nvarchar(max)", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Shifts", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_Shifts_AspNetUsers_MedicoReperibileId",
+                        column: x => x.MedicoReperibileId,
+                        principalTable: "AspNetUsers",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_Shifts_AspNetUsers_MedicoTurnoId",
+                        column: x => x.MedicoTurnoId,
+                        principalTable: "AspNetUsers",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_Shifts_Tenants_TenantId",
+                        column: x => x.TenantId,
+                        principalTable: "Tenants",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "SwapRequests",
                 columns: table => new
                 {
@@ -304,47 +324,6 @@ namespace OnCallendar.Infrastructure.Migrations
                         onDelete: ReferentialAction.Restrict);
                 });
 
-            migrationBuilder.CreateTable(
-                name: "ShiftAssignments",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    TenantId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    ShiftId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    MedicoId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    IsCurrent = table.Column<bool>(type: "bit", nullable: false),
-                    AssignedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    OriginatingSwapRequestId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    IsDeleted = table.Column<bool>(type: "bit", nullable: false),
-                    DeletedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    DeletedBy = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    CreatedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    CreatedBy = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    UpdatedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    UpdatedBy = table.Column<string>(type: "nvarchar(max)", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_ShiftAssignments", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_ShiftAssignments_AspNetUsers_MedicoId",
-                        column: x => x.MedicoId,
-                        principalTable: "AspNetUsers",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_ShiftAssignments_Shifts_ShiftId",
-                        column: x => x.ShiftId,
-                        principalTable: "Shifts",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_ShiftAssignments_SwapRequests_OriginatingSwapRequestId",
-                        column: x => x.OriginatingSwapRequestId,
-                        principalTable: "SwapRequests",
-                        principalColumn: "Id");
-                });
-
             migrationBuilder.CreateIndex(
                 name: "IX_AspNetRoleClaims_RoleId",
                 table: "AspNetRoleClaims",
@@ -378,9 +357,9 @@ namespace OnCallendar.Infrastructure.Migrations
                 column: "NormalizedEmail");
 
             migrationBuilder.CreateIndex(
-                name: "IX_AspNetUsers_TenantId_Email",
+                name: "IX_AspNetUsers_TenantId_MedicoNumber",
                 table: "AspNetUsers",
-                columns: new[] { "TenantId", "Email" });
+                columns: new[] { "TenantId", "MedicoNumber" });
 
             migrationBuilder.CreateIndex(
                 name: "UserNameIndex",
@@ -395,29 +374,29 @@ namespace OnCallendar.Infrastructure.Migrations
                 columns: new[] { "TenantId", "EntityType", "EntityId" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_ShiftAssignments_MedicoId",
-                table: "ShiftAssignments",
-                column: "MedicoId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_ShiftAssignments_OriginatingSwapRequestId",
-                table: "ShiftAssignments",
-                column: "OriginatingSwapRequestId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_ShiftAssignments_ShiftId_IsCurrent",
-                table: "ShiftAssignments",
-                columns: new[] { "ShiftId", "IsCurrent" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_ShiftAssignments_TenantId_MedicoId_IsCurrent",
-                table: "ShiftAssignments",
-                columns: new[] { "TenantId", "MedicoId", "IsCurrent" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Shifts_TenantId_StartUtc_EndUtc",
+                name: "IX_Shifts_MedicoReperibileId",
                 table: "Shifts",
-                columns: new[] { "TenantId", "StartUtc", "EndUtc" });
+                column: "MedicoReperibileId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Shifts_MedicoTurnoId",
+                table: "Shifts",
+                column: "MedicoTurnoId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Shifts_TenantId_Date",
+                table: "Shifts",
+                columns: new[] { "TenantId", "Date" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Shifts_TenantId_MedicoTurnoId",
+                table: "Shifts",
+                columns: new[] { "TenantId", "MedicoTurnoId" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Shifts_TenantId_StartUtc",
+                table: "Shifts",
+                columns: new[] { "TenantId", "StartUtc" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_SwapRequests_CounterpartMedicoId",
@@ -473,19 +452,16 @@ namespace OnCallendar.Infrastructure.Migrations
                 name: "AuditLogs");
 
             migrationBuilder.DropTable(
-                name: "ShiftAssignments");
+                name: "SwapRequests");
 
             migrationBuilder.DropTable(
                 name: "AspNetRoles");
 
             migrationBuilder.DropTable(
-                name: "SwapRequests");
+                name: "Shifts");
 
             migrationBuilder.DropTable(
                 name: "AspNetUsers");
-
-            migrationBuilder.DropTable(
-                name: "Shifts");
 
             migrationBuilder.DropTable(
                 name: "Tenants");

@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import apiClient, { setAuthToken } from '../api/apiClient';
+import apiClient, { setAuthToken, setOnUnauthorized } from '../api/apiClient';
 
 export type AuthUser = {
   userId: string;
@@ -25,6 +25,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const logout = useCallback(async () => {
+    setAuthToken(null);
+    setToken(null);
+    setUser(null);
+    await AsyncStorage.removeItem(STORAGE_KEY);
+  }, []);
+
+  // Registra il callback di auto-logout sull'apiClient (gestione 401)
+  useEffect(() => {
+    setOnUnauthorized(() => { void logout(); });
+    return () => setOnUnauthorized(null);
+  }, [logout]);
 
   useEffect(() => {
     (async () => {
@@ -55,13 +68,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToken(data.token);
     setUser(u);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ token: data.token, user: u }));
-  }, []);
-
-  const logout = useCallback(async () => {
-    setAuthToken(null);
-    setToken(null);
-    setUser(null);
-    await AsyncStorage.removeItem(STORAGE_KEY);
   }, []);
 
   const value = useMemo<AuthState>(

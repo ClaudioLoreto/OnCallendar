@@ -21,20 +21,14 @@ public class ApplicationDbContext
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public new DbSet<ApplicationUser> Users => Set<ApplicationUser>();
     public DbSet<Shift> Shifts => Set<Shift>();
-    public DbSet<ShiftAssignment> ShiftAssignments => Set<ShiftAssignment>();
     public DbSet<SwapRequest> SwapRequests => Set<SwapRequest>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
-
-        // Carica tutte le IEntityTypeConfiguration<> dell'assembly
         builder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
 
-        // ---- Global Query Filters ----
-        // 1) Soft delete
-        // 2) Multi-tenant: se il provider restituisce un tenant, filtra automaticamente.
         var currentTenantId = _tenantProvider.GetCurrentTenantId();
 
         builder.Entity<Tenant>().HasQueryFilter(t => !t.IsDeleted);
@@ -46,10 +40,6 @@ public class ApplicationDbContext
         builder.Entity<Shift>().HasQueryFilter(s =>
             !s.IsDeleted &&
             (currentTenantId == null || s.TenantId == currentTenantId));
-
-        builder.Entity<ShiftAssignment>().HasQueryFilter(a =>
-            !a.IsDeleted &&
-            (currentTenantId == null || a.TenantId == currentTenantId));
 
         builder.Entity<SwapRequest>().HasQueryFilter(r =>
             !r.IsDeleted &&

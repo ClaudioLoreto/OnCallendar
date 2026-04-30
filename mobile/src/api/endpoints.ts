@@ -8,67 +8,98 @@ export const resolveAvatarUrl = (url?: string | null): string | null => {
   return url;
 };
 
-export type ShiftStatus = 'Assigned' | 'OnBoard' | 'Completed' | 'Cancelled';
+// ---------- Shift / Calendar ----------
+
+/** Codice del turno secondo la classificazione storica del calendario di Navelli. */
+export type ShiftCode = 'F' | 'FN' | 'P' | 'PN' | 'N';
+
+/** Numerico per allineamento col backend (System.Text.Json serializza enum come int). */
+export const ShiftStatus = {
+  Assigned: 1,
+  OnBoard: 2,
+  Completed: 3,
+  Cancelled: 4,
+} as const;
+export type ShiftStatusValue = (typeof ShiftStatus)[keyof typeof ShiftStatus];
+
+export type MedicoRefDto = {
+  id: string;
+  fullName: string;
+  avatarUrl: string | null;
+  number: number | null;
+};
 
 export type ShiftDto = {
   id: string;
+  date: string;          // yyyy-MM-dd
+  code: ShiftCode;
+  codeLabel: string;     // "Festivo Diurno", ecc.
   startUtc: string;
   endUtc: string;
-  location: string | null;
-  notes: string | null;
-  status: ShiftStatus;
-  assignedMedicoId: string | null;
-  assignedMedicoName: string | null;
+  startLocal: string;    // "08:00"
+  endLocal: string;      // "20:00"
+  status: ShiftStatusValue;
+  medicoTurno: MedicoRefDto | null;
+  medicoReperibile: MedicoRefDto | null;
+  isMineTurno: boolean;
+  isMineReperibile: boolean;
+  isPast: boolean;
 };
 
-export type AssigneeDto = { medicoId: string; fullName: string; avatarUrl: string | null };
-export type SlotDto = {
-  shiftId: string;
+export type DayDto = {
+  date: string;          // yyyy-MM-dd
+  shifts: ShiftDto[];
+};
+
+// ---------- Swaps ----------
+
+export const SwapStatus = {
+  Pending: 1,
+  AutoApproved: 2,
+  Rejected: 3,
+  Cancelled: 4,
+  BlockedByRules: 5,
+} as const;
+export type SwapStatusValue = (typeof SwapStatus)[keyof typeof SwapStatus];
+
+export const SwapType = {
+  Giveaway: 1,
+  Swap: 2,
+  PickFromBoard: 3,
+} as const;
+export type SwapTypeValue = (typeof SwapType)[keyof typeof SwapType];
+
+export type ShiftBriefDto = {
+  id: string;
+  date: string;
+  code: ShiftCode;
   startUtc: string;
   endUtc: string;
-  capacity: number;
-  label: string;
-  status: ShiftStatus;
-  assignees: AssigneeDto[];
-  isMine: boolean;
-  hasFreeSpot: boolean;
 };
-export type DayDto = { dateUtc: string; slots: SlotDto[] };
-
-export type BoardItemDto = {
-  shiftId: string;
-  startUtc: string;
-  endUtc: string;
-  location: string | null;
-  notes: string | null;
-  offeredByMedicoId: string;
-  offeredByMedicoName: string;
-};
-
-export type MedicoDto = { id: string; fullName: string; email: string; avatarUrl: string | null };
-
-export type SwapStatus =
-  | 'Pending' | 'AutoApproved' | 'Rejected' | 'Cancelled' | 'BlockedByRules';
-export type SwapType = 'Giveaway' | 'Swap' | 'PickFromBoard';
 
 export type SwapDto = {
   id: string;
-  type: SwapType;
-  status: SwapStatus;
+  type: SwapTypeValue;
+  status: SwapStatusValue;
   initiatorId: string;
   initiatorName: string;
-  initiatorShiftId: string;
-  initiatorShiftStart: string;
-  initiatorShiftEnd: string;
+  initiatorShift: ShiftBriefDto;
   counterpartId: string | null;
   counterpartName: string | null;
-  counterpartShiftId: string | null;
-  counterpartShiftStart: string | null;
-  counterpartShiftEnd: string | null;
+  counterpartShift: ShiftBriefDto | null;
   message: string | null;
   resolutionReason: string | null;
   createdAtUtc: string;
   resolvedAtUtc: string | null;
+};
+
+// ---------- Users ----------
+
+export type MedicoDto = {
+  id: string;
+  fullName: string;
+  email: string;
+  avatarUrl: string | null;
 };
 
 export type MeDto = {
@@ -83,6 +114,8 @@ export type MeDto = {
   emailConfirmed: boolean;
   phoneConfirmed: boolean;
 };
+
+// ---------- API ----------
 
 export const AuthApi = {
   forgotPassword: (emailOrPhone: string) =>
@@ -101,16 +134,14 @@ export const ShiftsApi = {
 export const CalendarApi = {
   list: (from?: Date, to?: Date) => apiClient.get<DayDto[]>('/api/calendar', {
     params: {
-      from: from?.toISOString(),
-      to: to?.toISOString(),
+      from: from ? from.toISOString().slice(0, 10) : undefined,
+      to:   to   ? to.toISOString().slice(0, 10)   : undefined,
     },
   }).then(r => r.data),
-  join: (shiftIds: string[]) =>
-    apiClient.post('/api/calendar/join', { shiftIds }).then(r => r.data),
 };
 
 export const BoardApi = {
-  list: () => apiClient.get<BoardItemDto[]>('/api/board').then(r => r.data),
+  list: () => apiClient.get<ShiftDto[]>('/api/board').then(r => r.data),
 };
 
 export const UsersApi = {
@@ -139,6 +170,7 @@ export const UsersApi = {
 export const SwapsApi = {
   incoming: () => apiClient.get<SwapDto[]>('/api/swaps/incoming').then(r => r.data),
   outgoing: () => apiClient.get<SwapDto[]>('/api/swaps/outgoing').then(r => r.data),
+  history:  () => apiClient.get<SwapDto[]>('/api/swaps/history').then(r => r.data),
   giveaway: (shiftId: string, toMedicoId: string, message?: string) =>
     apiClient.post<SwapDto>('/api/swaps/giveaway', { shiftId, toMedicoId, message }).then(r => r.data),
   swap: (myShiftId: string, otherShiftId: string, message?: string) =>
@@ -151,6 +183,72 @@ export const SwapsApi = {
   cancel: (id: string) => apiClient.post<SwapDto>(`/api/swaps/${id}/cancel`).then(r => r.data),
 };
 
+// ---------- Helpers ----------
+
+/** Etichetta breve del codice ("Festivo D.", "Notte", ...). */
+export const shiftCodeShort = (c: ShiftCode): string => {
+  switch (c) {
+    case 'F':  return 'Festivo';
+    case 'FN': return 'Festivo notte';
+    case 'P':  return 'Prefestivo';
+    case 'PN': return 'Prefest. notte';
+    case 'N':  return 'Notte';
+  }
+};
+
+/** Icona Ionicons per il codice. */
+export const shiftCodeIcon = (c: ShiftCode): string => {
+  switch (c) {
+    case 'F':
+    case 'P':  return 'sunny-outline';
+    case 'FN':
+    case 'PN':
+    case 'N':  return 'moon-outline';
+  }
+};
+
+/** Tonalità badge per il codice. */
+export const shiftCodeTone = (c: ShiftCode): 'success' | 'warning' | 'info' | 'neutral' | 'danger' => {
+  switch (c) {
+    case 'F':
+    case 'FN': return 'danger';      // festivi → rosso
+    case 'P':
+    case 'PN': return 'warning';     // prefestivi → arancio
+    case 'N':  return 'info';        // infrasettimanale → blu
+  }
+};
+
+export const swapStatusLabel = (s: SwapStatusValue): string => {
+  switch (s) {
+    case SwapStatus.Pending:        return 'In attesa';
+    case SwapStatus.AutoApproved:   return 'Approvato';
+    case SwapStatus.Rejected:       return 'Rifiutato';
+    case SwapStatus.Cancelled:      return 'Annullato';
+    case SwapStatus.BlockedByRules: return 'Bloccato';
+    default: return String(s);
+  }
+};
+
+export const swapStatusTone = (s: SwapStatusValue): 'success' | 'warning' | 'info' | 'neutral' | 'danger' => {
+  switch (s) {
+    case SwapStatus.AutoApproved:   return 'success';
+    case SwapStatus.Rejected:       return 'danger';
+    case SwapStatus.BlockedByRules: return 'danger';
+    case SwapStatus.Cancelled:      return 'neutral';
+    case SwapStatus.Pending:
+    default: return 'warning';
+  }
+};
+
+export const swapTypeLabel = (t: SwapTypeValue): string => {
+  switch (t) {
+    case SwapType.Giveaway:      return 'Cessione';
+    case SwapType.Swap:          return 'Scambio';
+    case SwapType.PickFromBoard: return 'Da bacheca';
+    default: return String(t);
+  }
+};
+
 export const formatRange = (startIso: string, endIso: string) => {
   const s = new Date(startIso);
   const e = new Date(endIso);
@@ -161,7 +259,8 @@ export const formatRange = (startIso: string, endIso: string) => {
 };
 
 export const formatDayLong = (iso: string, locale = 'it-IT') => {
-  const d = new Date(iso);
+  // accetta sia "yyyy-MM-dd" che ISO completo
+  const d = iso.length === 10 ? new Date(`${iso}T00:00:00`) : new Date(iso);
   return d.toLocaleDateString(locale, {
     weekday: 'long', day: '2-digit', month: 'long',
   });

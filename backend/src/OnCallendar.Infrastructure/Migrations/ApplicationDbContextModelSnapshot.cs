@@ -220,6 +220,9 @@ namespace OnCallendar.Infrastructure.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<int?>("MedicoNumber")
+                        .HasColumnType("int");
+
                     b.Property<string>("NormalizedEmail")
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
@@ -284,7 +287,7 @@ namespace OnCallendar.Infrastructure.Migrations
                         .HasDatabaseName("UserNameIndex")
                         .HasFilter("[NormalizedUserName] IS NOT NULL");
 
-                    b.HasIndex("TenantId", "Email");
+                    b.HasIndex("TenantId", "MedicoNumber");
 
                     b.ToTable("AspNetUsers", (string)null);
                 });
@@ -355,16 +358,17 @@ namespace OnCallendar.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<int>("Capacity")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(2);
+                    b.Property<int>("Code")
+                        .HasColumnType("int");
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("CreatedBy")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date");
 
                     b.Property<DateTime?>("DeletedAtUtc")
                         .HasColumnType("datetime2");
@@ -378,9 +382,11 @@ namespace OnCallendar.Infrastructure.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
-                    b.Property<string>("Location")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
+                    b.Property<Guid?>("MedicoReperibileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("MedicoTurnoId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)
@@ -403,67 +409,17 @@ namespace OnCallendar.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "StartUtc", "EndUtc");
+                    b.HasIndex("MedicoReperibileId");
+
+                    b.HasIndex("MedicoTurnoId");
+
+                    b.HasIndex("TenantId", "Date");
+
+                    b.HasIndex("TenantId", "MedicoTurnoId");
+
+                    b.HasIndex("TenantId", "StartUtc");
 
                     b.ToTable("Shifts", (string)null);
-                });
-
-            modelBuilder.Entity("OnCallendar.Domain.Entities.ShiftAssignment", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("AssignedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("DeletedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsCurrent")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid>("MedicoId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("OriginatingSwapRequestId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("ShiftId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("MedicoId");
-
-                    b.HasIndex("OriginatingSwapRequestId");
-
-                    b.HasIndex("ShiftId", "IsCurrent");
-
-                    b.HasIndex("TenantId", "MedicoId", "IsCurrent");
-
-                    b.ToTable("ShiftAssignments", (string)null);
                 });
 
             modelBuilder.Entity("OnCallendar.Domain.Entities.SwapRequest", b =>
@@ -547,7 +503,8 @@ namespace OnCallendar.Infrastructure.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Address")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
@@ -562,7 +519,8 @@ namespace OnCallendar.Infrastructure.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("FiscalCode")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
@@ -662,39 +620,27 @@ namespace OnCallendar.Infrastructure.Migrations
 
             modelBuilder.Entity("OnCallendar.Domain.Entities.Shift", b =>
                 {
+                    b.HasOne("OnCallendar.Domain.Entities.ApplicationUser", "MedicoReperibile")
+                        .WithMany()
+                        .HasForeignKey("MedicoReperibileId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("OnCallendar.Domain.Entities.ApplicationUser", "MedicoTurno")
+                        .WithMany()
+                        .HasForeignKey("MedicoTurnoId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("OnCallendar.Domain.Entities.Tenant", "Tenant")
                         .WithMany("Shifts")
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.Navigation("MedicoReperibile");
+
+                    b.Navigation("MedicoTurno");
+
                     b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("OnCallendar.Domain.Entities.ShiftAssignment", b =>
-                {
-                    b.HasOne("OnCallendar.Domain.Entities.ApplicationUser", "Medico")
-                        .WithMany("ShiftAssignments")
-                        .HasForeignKey("MedicoId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("OnCallendar.Domain.Entities.SwapRequest", "OriginatingSwapRequest")
-                        .WithMany()
-                        .HasForeignKey("OriginatingSwapRequestId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("OnCallendar.Domain.Entities.Shift", "Shift")
-                        .WithMany("Assignments")
-                        .HasForeignKey("ShiftId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Medico");
-
-                    b.Navigation("OriginatingSwapRequest");
-
-                    b.Navigation("Shift");
                 });
 
             modelBuilder.Entity("OnCallendar.Domain.Entities.SwapRequest", b =>
@@ -728,16 +674,6 @@ namespace OnCallendar.Infrastructure.Migrations
                     b.Navigation("InitiatorMedico");
 
                     b.Navigation("InitiatorShift");
-                });
-
-            modelBuilder.Entity("OnCallendar.Domain.Entities.ApplicationUser", b =>
-                {
-                    b.Navigation("ShiftAssignments");
-                });
-
-            modelBuilder.Entity("OnCallendar.Domain.Entities.Shift", b =>
-                {
-                    b.Navigation("Assignments");
                 });
 
             modelBuilder.Entity("OnCallendar.Domain.Entities.Tenant", b =>

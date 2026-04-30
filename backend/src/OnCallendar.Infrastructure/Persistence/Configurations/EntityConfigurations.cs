@@ -14,6 +14,8 @@ public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
         b.Property(x => x.Slug).IsRequired().HasMaxLength(80);
         b.HasIndex(x => x.Slug).IsUnique();
         b.Property(x => x.TimeZoneId).HasMaxLength(80);
+        b.Property(x => x.Address).HasMaxLength(400);
+        b.Property(x => x.FiscalCode).HasMaxLength(32);
     }
 }
 
@@ -36,7 +38,7 @@ public class ApplicationUserConfiguration : IEntityTypeConfiguration<Application
             .HasForeignKey(x => x.TenantId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        b.HasIndex(x => new { x.TenantId, x.Email });
+        b.HasIndex(x => new { x.TenantId, x.MedicoNumber });
     }
 }
 
@@ -46,44 +48,28 @@ public class ShiftConfiguration : IEntityTypeConfiguration<Shift>
     {
         b.ToTable("Shifts");
         b.HasKey(x => x.Id);
-        b.Property(x => x.Location).HasMaxLength(200);
         b.Property(x => x.Notes).HasMaxLength(1000);
         b.Property(x => x.Status).HasConversion<int>();
-        b.Property(x => x.Capacity).HasDefaultValue(2);
+        b.Property(x => x.Code).HasConversion<int>();
 
         b.HasOne(x => x.Tenant)
             .WithMany(t => t.Shifts)
             .HasForeignKey(x => x.TenantId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        b.HasIndex(x => new { x.TenantId, x.StartUtc, x.EndUtc });
-    }
-}
-
-public class ShiftAssignmentConfiguration : IEntityTypeConfiguration<ShiftAssignment>
-{
-    public void Configure(EntityTypeBuilder<ShiftAssignment> b)
-    {
-        b.ToTable("ShiftAssignments");
-        b.HasKey(x => x.Id);
-
-        b.HasOne(x => x.Shift)
-            .WithMany(s => s.Assignments)
-            .HasForeignKey(x => x.ShiftId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        b.HasOne(x => x.Medico)
-            .WithMany(u => u.ShiftAssignments)
-            .HasForeignKey(x => x.MedicoId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        b.HasOne(x => x.OriginatingSwapRequest)
+        b.HasOne(x => x.MedicoTurno)
             .WithMany()
-            .HasForeignKey(x => x.OriginatingSwapRequestId)
-            .OnDelete(DeleteBehavior.NoAction);
+            .HasForeignKey(x => x.MedicoTurnoId)
+            .OnDelete(DeleteBehavior.Restrict);
 
-        b.HasIndex(x => new { x.TenantId, x.MedicoId, x.IsCurrent });
-        b.HasIndex(x => new { x.ShiftId, x.IsCurrent });
+        b.HasOne(x => x.MedicoReperibile)
+            .WithMany()
+            .HasForeignKey(x => x.MedicoReperibileId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => new { x.TenantId, x.Date });
+        b.HasIndex(x => new { x.TenantId, x.StartUtc });
+        b.HasIndex(x => new { x.TenantId, x.MedicoTurnoId });
     }
 }
 

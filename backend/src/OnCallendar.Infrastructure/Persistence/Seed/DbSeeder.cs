@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Text.Json;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using OnCallendar.Domain.Entities;
@@ -6,26 +8,31 @@ using OnCallendar.Domain.Enums;
 namespace OnCallendar.Infrastructure.Persistence.Seed;
 
 /// <summary>
-/// Seed di sviluppo: crea il tenant "L'Aquila", un SuperAdmin globale
-/// e 3 medici operativi. Idempotente: se già esistono, non duplica.
+/// Seed di Navelli (tenant unico). Crea i 4 medici del calendario storico
+/// e importa i 478 turni del 2026 dal file embedded shifts-2026.json.
+///
+/// Variabili ambiente:
+///   ONCALLENDAR_RESET_DB = "true"  → DROP &amp; CREATE database (DEV ONLY).
+///   ONCALLENDAR_RESEED_SHIFTS = "true" → ricarica i turni anche se già presenti.
 /// </summary>
 public static class DbSeeder
 {
     public const string SuperAdminRole = "SuperAdmin";
     public const string MedicoRole     = "Medico";
 
-    // Credenziali di test (DEV ONLY — cambiare in produzione!)
     public const string AdminEmail    = "admin@oncallendar.local";
     public const string AdminPassword = "Admin#2026!";
 
-    public static readonly (string Email, string Password, string First, string Last)[] Medici =
-    {
-        ("mario.rossi@aquila.med",    "Medico#2026!", "Mario",  "Rossi"),
-        ("giulia.bianchi@aquila.med", "Medico#2026!", "Giulia", "Bianchi"),
-        ("luca.verdi@aquila.med",     "Medico#2026!", "Luca",   "Verdi"),
-    };
+    public const string NavelliTenantSlug = "navelli";
 
-    public const string AquilaTenantSlug = "laquila";
+    /// <summary>4 medici del calendario storico di Navelli.</summary>
+    public static readonly (int Number, string Email, string Password, string First, string Last)[] Medici =
+    {
+        (1, "superboy23+claudia@gmail.com",    "Medico#2026!", "Claudia",    "Ioannucci"),
+        (2, "superboy23+edoardo@gmail.com",    "Medico#2026!", "Edoardo",    "Luci"),
+        (3, "superboy23+emanuele@gmail.com",   "Medico#2026!", "Emanuele",   "Dimarteu"),
+        (4, "superboy23+alessandro@gmail.com", "Medico#2026!", "Alessandro", "Medico4"),
+    };
 
     public static async Task SeedAsync(
         ApplicationDbContext db,
@@ -33,28 +40,31 @@ public static class DbSeeder
         RoleManager<IdentityRole<Guid>> roleManager,
         CancellationToken ct = default)
     {
+        var resetDb = Environment.GetEnvironmentVariable("ONCALLENDAR_RESET_DB") == "true";
+        if (resetDb)
+        {
+            await db.Database.EnsureDeletedAsync(ct);
+        }
+
         await db.Database.MigrateAsync(ct);
 
-        // ---- Roles ----
+        // Roles
         foreach (var role in new[] { SuperAdminRole, MedicoRole })
         {
             if (!await roleManager.RoleExistsAsync(role))
                 await roleManager.CreateAsync(new IdentityRole<Guid>(role));
         }
 
-        // ---- Tenant L'Aquila ----
-        // IgnoreQueryFilters per essere indipendenti dal TenantProvider durante il seed.
-        var tenant = await db.Tenants
-            .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(t => t.Slug == AquilaTenantSlug, ct);
-
+        // Tenant Navelli
+        var tenant = await db.Tenants.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Slug == NavelliTenantSlug, ct);
         if (tenant is null)
         {
             tenant = new Tenant
             {
-                Name = "Guardia Medica L'Aquila",
-                Slug = AquilaTenantSlug,
-                Address = "Via dell'Ospedale, L'Aquila (AQ)",
+                Name = "Guardia Medica Navelli",
+                Slug = NavelliTenantSlug,
+                Address = "Navelli (AQ)",
                 TimeZoneId = "Europe/Rome",
                 IsActive = true,
                 CreatedAtUtc = DateTime.UtcNow,
@@ -63,7 +73,7 @@ public static class DbSeeder
             await db.SaveChangesAsync(ct);
         }
 
-        // ---- SuperAdmin globale (TenantId = null) ----
+        // SuperAdmin globale
         var admin = await userManager.FindByEmailAsync(AdminEmail);
         if (admin is null)
         {
@@ -86,142 +96,160 @@ public static class DbSeeder
             await userManager.AddToRoleAsync(admin, SuperAdminRole);
         }
 
-        // ---- Medici del tenant L'Aquila ----
-        foreach (var (email, password, first, last) in Medici)
+        // 4 Medici di Navelli
+        foreach (var (number, email, password, first, last) in Medici)
         {
             var user = await userManager.FindByEmailAsync(email);
-            if (user is not null) continue;
-
-            user = new ApplicationUser
+            if (user is null)
             {
-                UserName = email,
-                Email = email,
-                EmailConfirmed = true,
-                FirstName = first,
-                LastName = last,
-                Role = UserRole.Medico,
-                TenantId = tenant.Id,
-                IsActive = true,
-                CreatedAtUtc = DateTime.UtcNow,
-            };
-            var res = await userManager.CreateAsync(user, password);
-            if (!res.Succeeded)
-                throw new InvalidOperationException(
-                    $"Seed medico {email} failed: " +
-                    string.Join("; ", res.Errors.Select(e => e.Description)));
-            await userManager.AddToRoleAsync(user, MedicoRole);
+                user = new ApplicationUser
+                {
+                    UserName = email,
+                    Email = email,
+                    EmailConfirmed = true,
+                    FirstName = first,
+                    LastName = last,
+                    Role = UserRole.Medico,
+                    TenantId = tenant.Id,
+                    MedicoNumber = number,
+                    IsActive = true,
+                    CreatedAtUtc = DateTime.UtcNow,
+                };
+                var res = await userManager.CreateAsync(user, password);
+                if (!res.Succeeded)
+                    throw new InvalidOperationException(
+                        $"Seed medico {email} failed: " +
+                        string.Join("; ", res.Errors.Select(e => e.Description)));
+                await userManager.AddToRoleAsync(user, MedicoRole);
+            }
+            else if (user.MedicoNumber != number)
+            {
+                user.MedicoNumber = number;
+                await userManager.UpdateAsync(user);
+            }
         }
 
         await SeedShiftsAsync(db, tenant.Id, ct);
     }
 
-    /// <summary>
-    /// Crea per ogni giorno (oggi → +14gg) due turni da 12h (00:00–12:00 e 12:00–24:00 ora locale)
-    /// con capacità 2. I turni vengono pre-popolati lasciando volutamente
-    /// dei buchi così che Mario possa prenotarsi in fase di demo.
-    /// Idempotente: se trova già la struttura "v2" non rifà nulla.
-    /// </summary>
     private static async Task SeedShiftsAsync(
         ApplicationDbContext db, Guid tenantId, CancellationToken ct)
     {
-        const string SeedMarker = "SEED_V2_DAILY_2x12H";
+        var reseed = Environment.GetEnvironmentVariable("ONCALLENDAR_RESEED_SHIFTS") == "true";
 
-        // Se esiste già almeno un turno con il marker corrente => già seedato.
-        var alreadySeeded = await db.Shifts.IgnoreQueryFilters()
-            .AnyAsync(s => s.TenantId == tenantId && s.Notes != null && s.Notes.Contains(SeedMarker), ct);
-        if (alreadySeeded) return;
+        var existing = await db.Shifts.IgnoreQueryFilters()
+            .Where(s => s.TenantId == tenantId)
+            .CountAsync(ct);
 
-        // Wipe vecchi dati turni (dev only, mai in produzione).
-        // Cancello in ordine: SwapRequests -> Assignments -> Shifts (FK safe).
-        var oldSwaps = await db.SwapRequests.IgnoreQueryFilters()
-            .Where(r => r.TenantId == tenantId).ToListAsync(ct);
-        if (oldSwaps.Count > 0) db.SwapRequests.RemoveRange(oldSwaps);
+        if (existing > 0 && !reseed) return;
 
-        var oldAssigns = await db.ShiftAssignments.IgnoreQueryFilters()
-            .Where(a => a.TenantId == tenantId).ToListAsync(ct);
-        if (oldAssigns.Count > 0) db.ShiftAssignments.RemoveRange(oldAssigns);
-
-        var oldShifts = await db.Shifts.IgnoreQueryFilters()
-            .Where(s => s.TenantId == tenantId).ToListAsync(ct);
-        if (oldShifts.Count > 0) db.Shifts.RemoveRange(oldShifts);
-
-        await db.SaveChangesAsync(ct);
-
-        var medici = await db.Users.IgnoreQueryFilters()
-            .Where(u => u.TenantId == tenantId && u.Role == UserRole.Medico)
-            .OrderBy(u => u.LastName)
-            .ToListAsync(ct);
-        if (medici.Count < 3) return;
-
-        var rome = TryGetRomeTz();
-        var nowLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, rome);
-        var startDayLocal = nowLocal.Date; // oggi 00:00 locale
-
-        // Pattern di pre-popolamento: per ogni (giorno, slot) decido quanti medici inserire (0/1/2)
-        // così che ci siano sia turni vuoti, sia turni a metà, sia turni pieni.
-        // Slot 0 = 00-12, Slot 1 = 12-24
-        // Lasciamo OGGI praticamente vuoto, mentre i giorni successivi hanno carico crescente.
-        var rnd = new Random(42); // deterministico
-        var rotation = 0;
-
-        for (int day = 0; day < 14; day++)
+        if (reseed && existing > 0)
         {
-            var dayLocal = startDayLocal.AddDays(day);
+            var oldSwaps = await db.SwapRequests.IgnoreQueryFilters()
+                .Where(r => r.TenantId == tenantId).ToListAsync(ct);
+            if (oldSwaps.Count > 0) db.SwapRequests.RemoveRange(oldSwaps);
 
-            for (int slot = 0; slot < 2; slot++)
-            {
-                var startLocal = dayLocal.AddHours(slot * 12);
-                var endLocal = startLocal.AddHours(12);
-
-                var shift = new Shift
-                {
-                    TenantId = tenantId,
-                    StartUtc = TimeZoneInfo.ConvertTimeToUtc(startLocal, rome),
-                    EndUtc = TimeZoneInfo.ConvertTimeToUtc(endLocal, rome),
-                    Capacity = 2,
-                    Location = "Postazione L'Aquila Centro",
-                    Notes = $"{SeedMarker} {(slot == 0 ? "Mattina" : "Notte")} {startLocal:dd/MM} {startLocal:HH:mm}–{endLocal:HH:mm}",
-                    Status = ShiftStatus.Assigned,
-                    CreatedAtUtc = DateTime.UtcNow,
-                };
-                db.Shifts.Add(shift);
-
-                // Decisione assegnatari:
-                //  - giorno 0 (oggi): tutti i turni 0/2  → l'utente può subito provare a prenotarsi
-                //  - giorno 1..2: 1/2 → c'è un buco
-                //  - giorno 3..7: random tra 1 e 2 → mix
-                //  - giorno 8..13: 2/2 → pieni (così la UI mostra anche slot non disponibili)
-                int nAssign;
-                if (day == 0) nAssign = 0;
-                else if (day <= 2) nAssign = 1;
-                else if (day <= 7) nAssign = rnd.Next(1, 3);
-                else nAssign = 2;
-
-                // Round robin sui medici, evitando di mettere lo stesso medico due volte sullo stesso shift
-                var pickedIds = new HashSet<Guid>();
-                for (int i = 0; i < nAssign && pickedIds.Count < medici.Count; i++)
-                {
-                    var medico = medici[(rotation++) % medici.Count];
-                    if (!pickedIds.Add(medico.Id))
-                    {
-                        // se duplicato, scorro avanti
-                        i--;
-                        continue;
-                    }
-                    db.ShiftAssignments.Add(new ShiftAssignment
-                    {
-                        TenantId = tenantId,
-                        Shift = shift,
-                        MedicoId = medico.Id,
-                        IsCurrent = true,
-                        AssignedAtUtc = DateTime.UtcNow,
-                        CreatedAtUtc = DateTime.UtcNow,
-                    });
-                }
-            }
+            var oldShifts = await db.Shifts.IgnoreQueryFilters()
+                .Where(s => s.TenantId == tenantId).ToListAsync(ct);
+            db.Shifts.RemoveRange(oldShifts);
+            await db.SaveChangesAsync(ct);
         }
 
+        var medici = await db.Users.IgnoreQueryFilters()
+            .Where(u => u.TenantId == tenantId && u.Role == UserRole.Medico && u.MedicoNumber != null)
+            .ToDictionaryAsync(u => u.MedicoNumber!.Value, u => u.Id, ct);
+        if (medici.Count < 4) return;
+
+        var rome = TryGetRomeTz();
+        var json = LoadShiftsJson();
+        var doc = JsonDocument.Parse(json);
+        var arr = doc.RootElement.GetProperty("shifts");
+
+        var batch = new List<Shift>(arr.GetArrayLength());
+        foreach (var entry in arr.EnumerateArray())
+        {
+            var dateStr     = entry[0].GetString()!;        // "2026-04-30"
+            var codeStr     = entry[1].GetString()!;        // "F" / "FN" / ...
+            var medTurnoNum = entry[2].GetInt32();
+            var medRepNum   = entry[3].GetInt32();
+
+            var date = DateOnly.Parse(dateStr);
+            var code = ParseCode(codeStr);
+            var (startLocal, endLocal) = ComputeLocalWindow(date, code);
+
+            batch.Add(new Shift
+            {
+                TenantId = tenantId,
+                Date = date,
+                Code = code,
+                StartUtc = TimeZoneInfo.ConvertTimeToUtc(startLocal, rome),
+                EndUtc   = TimeZoneInfo.ConvertTimeToUtc(endLocal,   rome),
+                MedicoTurnoId      = medici.GetValueOrDefault(medTurnoNum),
+                MedicoReperibileId = medici.GetValueOrDefault(medRepNum),
+                Status = ShiftStatus.Assigned,
+                CreatedAtUtc = DateTime.UtcNow,
+            });
+        }
+
+        db.Shifts.AddRange(batch);
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Calcola gli orari locali (Europe/Rome) di un turno in base al codice.</summary>
+    public static (DateTime startLocal, DateTime endLocal) ComputeLocalWindow(DateOnly date, ShiftCode code)
+    {
+        var d = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        return code switch
+        {
+            ShiftCode.F  => (d.AddHours(8),  d.AddHours(20)),
+            ShiftCode.FN => (d.AddHours(20), d.AddDays(1).AddHours(8)),
+            ShiftCode.P  => (d.AddHours(10), d.AddHours(20)),
+            ShiftCode.PN => (d.AddHours(20), d.AddDays(1).AddHours(8)),
+            ShiftCode.N  => (d.AddHours(20), d.AddDays(1).AddHours(8)),
+            _ => throw new ArgumentOutOfRangeException(nameof(code))
+        };
+    }
+
+    private static ShiftCode ParseCode(string s) => s.ToUpperInvariant() switch
+    {
+        "F"  => ShiftCode.F,
+        "FN" => ShiftCode.FN,
+        "P"  => ShiftCode.P,
+        "PN" => ShiftCode.PN,
+        "N"  => ShiftCode.N,
+        _    => throw new ArgumentException($"Codice turno sconosciuto: {s}")
+    };
+
+    private static string LoadShiftsJson()
+    {
+        // Prova prima embedded resource
+        var asm = typeof(DbSeeder).Assembly;
+        var resource = asm.GetManifestResourceNames()
+            .FirstOrDefault(n => n.EndsWith("shifts-2026.json", StringComparison.OrdinalIgnoreCase));
+        if (resource is not null)
+        {
+            using var s = asm.GetManifestResourceStream(resource)!;
+            using var r = new StreamReader(s);
+            return r.ReadToEnd();
+        }
+
+        // Fallback su file su disco (utile in dev quando il file non è embedded)
+        var asmDir = Path.GetDirectoryName(asm.Location)!;
+        var candidates = new[]
+        {
+            Path.Combine(asmDir, "Persistence", "Seed", "shifts-2026.json"),
+            Path.Combine(AppContext.BaseDirectory, "shifts-2026.json"),
+            Path.Combine(AppContext.BaseDirectory, "Persistence", "Seed", "shifts-2026.json"),
+            // Risale fino a backend/src/OnCallendar.Infrastructure/Persistence/Seed/shifts-2026.json
+            Path.Combine(asmDir, "..", "..", "..", "..", "OnCallendar.Infrastructure",
+                          "Persistence", "Seed", "shifts-2026.json"),
+        };
+        foreach (var path in candidates)
+        {
+            if (File.Exists(path)) return File.ReadAllText(path);
+        }
+        throw new FileNotFoundException(
+            "shifts-2026.json non trovato (né come embedded resource né su disco).");
     }
 
     private static TimeZoneInfo TryGetRomeTz()

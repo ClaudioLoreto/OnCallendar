@@ -13,4 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="..\OnCallendar.Application\OnCallendar.Application.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Persistence\Seed\shifts-2026.json" />
+  </ItemGroup>
 </Project>

@@ -4,40 +4,41 @@ using OnCallendar.Domain.Enums;
 namespace OnCallendar.Domain.Entities;
 
 /// <summary>
-/// Slot di turno (es. 20:00 -> 08:00 di Guardia Medica).
-/// L'assegnazione effettiva al medico è in <see cref="ShiftAssignment"/>
-/// (separata per tracciare lo storico passaggi di mano).
+/// Singolo turno del calendario di guardia di Navelli.
+/// Ogni record ha un Codice (F/FN/P/PN/N) un Medico di Turno (titolare)
+/// e un Medico Reperibile (backup chiamato in caso di sovraccarico/assenza).
 /// </summary>
 public class Shift : BaseEntity, ITenantScoped, ISoftDeletable
 {
     public Guid TenantId { get; set; }
     public Tenant Tenant { get; set; } = null!;
 
-    /// <summary>Inizio turno in UTC.</summary>
+    /// <summary>Data di inizio del turno (data del calendario, ora locale).</summary>
+    public DateOnly Date { get; set; }
+
+    public ShiftCode Code { get; set; }
+
+    /// <summary>Inizio turno in UTC (calcolato a partire da Date + Code).</summary>
     public DateTime StartUtc { get; set; }
     /// <summary>Fine turno in UTC (esclusiva).</summary>
     public DateTime EndUtc { get; set; }
 
-    public string? Location { get; set; }
-    public string? Notes { get; set; }
+    /// <summary>Medico di turno titolare. Null se cessato/scoperto in attesa di assegnazione.</summary>
+    public Guid? MedicoTurnoId { get; set; }
+    public ApplicationUser? MedicoTurno { get; set; }
+
+    /// <summary>Medico reperibile (backup). Null se non previsto.</summary>
+    public Guid? MedicoReperibileId { get; set; }
+    public ApplicationUser? MedicoReperibile { get; set; }
 
     public ShiftStatus Status { get; set; } = ShiftStatus.Assigned;
 
-    /// <summary>Numero massimo di medici assegnabili allo stesso slot (default: 2).</summary>
-    public int Capacity { get; set; } = 2;
+    public string? Notes { get; set; }
 
-    /// <summary>Durata calcolata.</summary>
     public TimeSpan Duration => EndUtc - StartUtc;
 
     // Soft delete
     public bool IsDeleted { get; set; }
     public DateTime? DeletedAtUtc { get; set; }
     public string? DeletedBy { get; set; }
-
-    // Navigation
-    public ICollection<ShiftAssignment> Assignments { get; set; } = new List<ShiftAssignment>();
-
-    /// <summary>Assegnazione attualmente attiva (helper non mappato).</summary>
-    public ShiftAssignment? CurrentAssignment =>
-        Assignments.FirstOrDefault(a => a.IsCurrent && !a.IsDeleted);
 }

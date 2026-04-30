@@ -1,42 +1,42 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using OnCallendar.Application.Common.Interfaces;
 using OnCallendar.Domain.Enums;
 using OnCallendar.Infrastructure.Persistence;
+using static OnCallendar.Api.Controllers.ShiftDtos;
 
 namespace OnCallendar.Api.Controllers;
 
+/// <summary>
+/// Bacheca: turni futuri pubblicati dal medico di turno cercando un sostituto.
+/// </summary>
 [ApiController]
 [Route("api/board")]
 [Authorize]
 public sealed class BoardController : ControllerBase
 {
     private readonly ApplicationDbContext _db;
-    public BoardController(ApplicationDbContext db) => _db = db;
+    private readonly ICurrentUserService _user;
 
-    public sealed record BoardItemDto(
-        Guid ShiftId, DateTime StartUtc, DateTime EndUtc,
-        string? Location, string? Notes,
-        Guid OfferedByMedicoId, string OfferedByMedicoName);
-
-    /// <summary>Tutti i turni pubblicati sulla bacheca del tenant.</summary>
-    [HttpGet]
-    public async Task<ActionResult<IEnumerable<BoardItemDto>>> Get()
+    public BoardController(ApplicationDbContext db, ICurrentUserService user)
     {
+        _db = db; _user = user;
+    }
+
+    [HttpGet]
+    public async Task<ActionResult<IEnumerable<ShiftDto>>> Get()
+    {
+        if (_user.UserId is not Guid uid) return Unauthorized();
+
+        var nowUtc = DateTime.UtcNow;
         var items = await _db.Shifts
-            .Include(s => s.Assignments).ThenInclude(a => a.Medico)
-            .Where(s => s.Status == ShiftStatus.OnBoard && s.StartUtc > DateTime.UtcNow)
+            .Include(s => s.MedicoTurno)
+            .Include(s => s.MedicoReperibile)
+            .Where(s => s.Status == ShiftStatus.OnBoard && s.StartUtc > nowUtc)
             .OrderBy(s => s.StartUtc)
             .ToListAsync();
 
-        var dto = items.Select(s =>
-        {
-            var current = s.Assignments.First(a => a.IsCurrent && !a.IsDeleted);
-            return new BoardItemDto(
-                s.Id, s.StartUtc, s.EndUtc, s.Location, s.Notes,
-                current.MedicoId, $"{current.Medico.FirstName} {current.Medico.LastName}");
-        });
-
-        return Ok(dto);
+        return Ok(items.Select(s => Map(s, uid)));
     }
 }
