@@ -237,7 +237,12 @@ export default function ProfileScreen({ navigation }: Props) {
           <Text style={[theme.typography.caption, { marginBottom: theme.spacing.m }]}>
             Vedi tutti i turni passati e le richieste di scambio.
           </Text>
-          <Button title="Apri storico" variant="secondary" icon="time-outline" onPress={() => navigation.navigate('History')} />
+          <Button title="Apri storico" variant="secondary" icon="time-outline"
+            onPress={() => {
+              // Profile è ora uno screen normale, navigate funziona direttamente
+              navigation.navigate('History');
+            }}
+          />
         </Card>
 
         <Card>

@@ -23,6 +23,7 @@ public class ApplicationDbContext
     public DbSet<Shift> Shifts => Set<Shift>();
     public DbSet<SwapRequest> SwapRequests => Set<SwapRequest>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<Notification> Notifications => Set<Notification>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -47,5 +48,8 @@ public class ApplicationDbContext
 
         builder.Entity<AuditLog>().HasQueryFilter(l =>
             currentTenantId == null || l.TenantId == currentTenantId);
+
+        builder.Entity<Notification>().HasQueryFilter(n =>
+            currentTenantId == null || n.TenantId == currentTenantId);
     }
 }

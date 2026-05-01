@@ -1,20 +1,23 @@
 import React from 'react';
-import { Text, View } from 'react-native';
+import { Text, TouchableOpacity, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from './ui';
 import { useTheme } from '../theme/ThemeContext';
 import { useAuth } from '../auth/AuthContext';
+import { useNotifications } from '../auth/NotificationsContext';
 
 /**
- * Header con titolo e avatar in alto a destra.
- * Cliccando l'avatar si apre la sezione Profilo.
+ * Header con titolo, campanella notifiche (badge) e avatar utente.
  */
 export const AppHeader: React.FC<{
   title: string;
   subtitle?: string;
   onAvatarPress?: () => void;
-}> = ({ title, subtitle, onAvatarPress }) => {
+  onBellPress?: () => void;
+}> = ({ title, subtitle, onAvatarPress, onBellPress }) => {
   const { theme } = useTheme();
   const { user } = useAuth();
+  const { unreadCount } = useNotifications();
 
   return (
     <View style={{
@@ -30,6 +33,32 @@ export const AppHeader: React.FC<{
           <Text style={theme.typography.caption}>{subtitle}</Text>
         ) : null}
       </View>
+
+      {/* Campanella notifiche */}
+      {onBellPress ? (
+        <TouchableOpacity onPress={onBellPress} activeOpacity={0.7}
+          style={{ marginRight: theme.spacing.m, position: 'relative' }}>
+          <Ionicons
+            name={unreadCount > 0 ? 'notifications' : 'notifications-outline'}
+            size={24}
+            color={unreadCount > 0 ? theme.colors.primary : theme.colors.textSecondary}
+          />
+          {unreadCount > 0 ? (
+            <View style={{
+              position: 'absolute', top: -4, right: -6,
+              minWidth: 18, height: 18, borderRadius: 9,
+              backgroundColor: theme.colors.danger,
+              alignItems: 'center', justifyContent: 'center',
+              paddingHorizontal: 3,
+            }}>
+              <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800', lineHeight: 12 }}>
+                {unreadCount > 99 ? '99+' : String(unreadCount)}
+              </Text>
+            </View>
+          ) : null}
+        </TouchableOpacity>
+      ) : null}
+
       <Avatar fullName={user?.fullName ?? '?'} url={null} onPress={onAvatarPress} />
     </View>
   );

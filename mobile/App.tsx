@@ -3,6 +3,7 @@ import React from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from './src/auth/AuthContext';
+import { NotificationsProvider } from './src/auth/NotificationsContext';
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { I18nProvider } from './src/i18n/I18nContext';
 import RootNavigator from './src/navigation/RootNavigator';
@@ -18,8 +19,10 @@ export default function App() {
       <ThemeProvider>
         <I18nProvider>
           <AuthProvider>
-            <ThemedStatusBar />
-            <RootNavigator />
+            <NotificationsProvider>
+              <ThemedStatusBar />
+              <RootNavigator />
+            </NotificationsProvider>
           </AuthProvider>
         </I18nProvider>
       </ThemeProvider>

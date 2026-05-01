@@ -35,7 +35,7 @@ export default function SwapsScreen({ navigation }: Props) {
   const [days, setDays] = useState<DayDto[]>([]);
   const [colleagues, setColleagues] = useState<MedicoDto[]>([]);
   const [pickedShift, setPickedShift] = useState<ShiftDto | null>(null);
-  const [pickedColleague, setPickedColleague] = useState<MedicoDto | null>(null);
+  const [pickedColleagues, setPickedColleagues] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [stepError, setStepError] = useState<string | null>(null);
@@ -130,7 +130,7 @@ export default function SwapsScreen({ navigation }: Props) {
   // ---- nuova richiesta ----
   const openNew = async () => {
     setNewOpen(true);
-    setPickedShift(null); setPickedColleague(null);
+    setPickedShift(null); setPickedColleagues(new Set());
     setMessage(''); setStepError(null);
     try {
       const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -153,16 +153,16 @@ export default function SwapsScreen({ navigation }: Props) {
   }, [days]);
 
   const submitNew = async () => {
-    if (!pickedShift || !pickedColleague) return;
+    if (!pickedShift || pickedColleagues.size === 0) return;
     setSubmitting(true); setStepError(null);
     try {
-      await SwapsApi.giveaway(pickedShift.id, pickedColleague.id, message || undefined);
+      await SwapsApi.giveawayMulti(pickedShift.id, Array.from(pickedColleagues), message || undefined);
       setNewOpen(false);
       await loadLists();
     } catch (e: any) {
       const code = e?.response?.status;
       const msg = e?.response?.data?.error ?? e?.message ?? 'Errore invio';
-      setStepError(code === 409 ? 'Hai già una richiesta in sospeso per questo turno.' : msg);
+      setStepError(code === 409 ? 'Esiste già una richiesta in sospeso per questo turno.' : msg);
     } finally {
       setSubmitting(false);
     }
@@ -181,7 +181,7 @@ export default function SwapsScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }}>
-      <AppHeader title={t('swaps.title')} onAvatarPress={() => navigation.navigate('Profile')} />
+      <AppHeader title={t('swaps.title')} onAvatarPress={() => navigation.navigate('Profile')} onBellPress={() => navigation.navigate('Notifications')} />
 
       <View style={{ paddingHorizontal: theme.spacing.l }}>
         <SegmentedControl<Tab>
@@ -318,14 +318,20 @@ export default function SwapsScreen({ navigation }: Props) {
           {pickedShift ? (
             <>
               <Text style={[theme.typography.body, { fontWeight: '700', marginBottom: theme.spacing.s }]}>
-                <Icon name="people-outline" size={16} color={theme.colors.textPrimary} />  2. A chi cedi?
+                <Icon name="people-outline" size={16} color={theme.colors.textPrimary} />  2. A chi cedi? (seleziona uno o più)
               </Text>
               {colleagues.map(m => {
-                const active = pickedColleague?.id === m.id;
+                const active = pickedColleagues.has(m.id);
                 return (
                   <TouchableOpacity
                     key={m.id}
-                    onPress={() => setPickedColleague(m)}
+                    onPress={() => {
+                      setPickedColleagues(prev => {
+                        const next = new Set(prev);
+                        if (next.has(m.id)) next.delete(m.id); else next.add(m.id);
+                        return next;
+                      });
+                    }}
                     style={{
                       flexDirection: 'row', alignItems: 'center', gap: 12,
                       borderWidth: 1,
@@ -337,10 +343,23 @@ export default function SwapsScreen({ navigation }: Props) {
                   >
                     <Avatar fullName={m.fullName} url={m.avatarUrl} size={32} />
                     <Text style={[theme.typography.body, { flex: 1 }]}>{m.fullName}</Text>
-                    {active ? <Icon name="checkmark-circle" size={22} color={theme.colors.primary} /> : null}
+                    <View style={{
+                      width: 22, height: 22, borderRadius: 4,
+                      borderWidth: 2,
+                      borderColor: active ? theme.colors.primary : theme.colors.border,
+                      backgroundColor: active ? theme.colors.primary : 'transparent',
+                      alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      {active ? <Icon name="checkmark" size={14} color="#fff" /> : null}
+                    </View>
                   </TouchableOpacity>
                 );
               })}
+              {pickedColleagues.size > 1 ? (
+                <Text style={[theme.typography.caption, { color: theme.colors.textSecondary, marginBottom: theme.spacing.s }]}>
+                  Il primo che accetta prende il turno; gli altri riceveranno una cancellazione automatica.
+                </Text>
+              ) : null}
 
               <Field label="Messaggio (opzionale)" value={message} onChangeText={setMessage} multiline />
             </>
@@ -356,9 +375,10 @@ export default function SwapsScreen({ navigation }: Props) {
             </View>
             <View style={{ flex: 1 }}>
               <Button
-                title="Invia"
+                title={pickedColleagues.size > 1 ? `Invia a ${pickedColleagues.size}` : 'Invia'}
                 icon="send"
                 loading={submitting}
+                disabled={!pickedShift || pickedColleagues.size === 0}
                 onPress={submitNew}
               />
             </View>

@@ -70,14 +70,16 @@ const LoginScreen: React.FC = () => {
             autoCapitalize="none"
             autoCorrect={false}
             keyboardType="default"
-            autoComplete="username"
+            autoComplete="off"
+            textContentType="none"
           />
           <Field
             label={t('login.password')}
             value={password}
             onChangeText={setPassword}
             secureTextEntry
-            autoComplete="password"
+            autoComplete="off"
+            textContentType="none"
           />
           <View style={{ height: theme.spacing.s }} />
           <Button title={t('login.submit')} icon="log-in-outline" onPress={submit} loading={loading} />

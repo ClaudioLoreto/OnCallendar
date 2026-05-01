@@ -180,12 +180,21 @@ export default function CalendarScreen({ navigation }: Props) {
 
         {/* Medico reperibile */}
         {s.medicoReperibile ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6,
+            backgroundColor: s.isMineReperibile ? theme.colors.warningBg ?? 'rgba(251,191,36,0.12)' : 'transparent',
+            borderRadius: 6, paddingHorizontal: s.isMineReperibile ? 6 : 0,
+            paddingVertical: s.isMineReperibile ? 3 : 0,
+          }}>
             <Avatar fullName={s.medicoReperibile.fullName} url={s.medicoReperibile.avatarUrl} size={20} />
-            <Text style={[theme.typography.caption, { flex: 1, fontWeight: s.isMineReperibile ? '700' : '400' }]}>
-              {s.medicoReperibile.fullName}{s.isMineReperibile ? ' (tu)' : ''}
+            <Text style={[theme.typography.caption, {
+              flex: 1,
+              fontWeight: s.isMineReperibile ? '700' : '400',
+              color: s.isMineReperibile ? '#d97706' : theme.colors.textSecondary,
+            }]}>
+              {s.medicoReperibile.fullName}{s.isMineReperibile ? ' (tu – reperibile)' : ''}
             </Text>
-            <Text style={theme.typography.caption}>reperibile</Text>
+            <Badge label="Reperibile" tone="warning" />
           </View>
         ) : null}
 
@@ -206,7 +215,13 @@ export default function CalendarScreen({ navigation }: Props) {
       <Card>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
           <Text style={[theme.typography.h3, { textTransform: 'capitalize' }]}>{dayHeader(item.date)}</Text>
-          {today ? <Badge label="Oggi" tone="info" /> : hasMine ? <Badge label="Sei in turno" tone="success" /> : null}
+          {today
+            ? <Badge label="Oggi" tone="info" />
+            : item.shifts.some(s => s.isMineTurno)
+              ? <Badge label="Sei in turno" tone="success" />
+              : item.shifts.some(s => s.isMineReperibile)
+                ? <Badge label="Sei reperibile" tone="warning" />
+                : null}
         </View>
         {item.shifts.map(renderShift)}
       </Card>
@@ -215,7 +230,7 @@ export default function CalendarScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }}>
-      <AppHeader title={t('calendar.title')} onAvatarPress={() => navigation.navigate('Profile')} />
+      <AppHeader title={t('calendar.title')} onAvatarPress={() => navigation.navigate('Profile')} onBellPress={() => navigation.navigate('Notifications')} />
       {loading ? (
         <EmptyState title={t('common.loading')} />
       ) : (

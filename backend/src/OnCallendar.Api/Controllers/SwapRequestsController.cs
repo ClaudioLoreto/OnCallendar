@@ -7,6 +7,7 @@ using OnCallendar.Domain.Entities;
 using OnCallendar.Domain.Enums;
 using OnCallendar.Domain.Services;
 using OnCallendar.Infrastructure.Persistence;
+using System.Net;
 
 namespace OnCallendar.Api.Controllers;
 
@@ -138,10 +139,13 @@ public sealed class SwapRequestsController : ControllerBase
         _audit.Log("SwapRequest", swap.Id, "GiveawayCreated", shift.TenantId,
             newValues: new { swap.InitiatorMedicoId, swap.CounterpartMedicoId, swap.InitiatorShiftId });
 
-        await _db.SaveChangesAsync();
-
         // Notifica al destinatario
         var initiator = await _db.Users.FirstOrDefaultAsync(u => u.Id == uid);
+        _db.Notifications.Add(MakeNotif(shift.TenantId, to.Id, "SwapIncoming",
+            $"{FullName(initiator)} ti ha proposto il turno {shift.Code} del {shift.Date:dd/MM/yyyy}", swap.Id));
+
+        await _db.SaveChangesAsync();
+
         await SendSwapMailAsync(
             to: to,
             initiator: initiator,
@@ -149,13 +153,97 @@ public sealed class SwapRequestsController : ControllerBase
             body: $"<p>Ciao {to.FirstName},</p>" +
                   $"<p><b>{FullName(initiator)}</b> ti ha proposto di prendere il suo turno " +
                   $"<b>{shift.Code}</b> del <b>{shift.Date:dd/MM/yyyy}</b>.</p>" +
-                  (string.IsNullOrWhiteSpace(req.Message) ? string.Empty : $"<p><i>Messaggio:</i> {System.Net.WebUtility.HtmlEncode(req.Message)}</p>") +
+                  (string.IsNullOrWhiteSpace(req.Message) ? string.Empty : $"<p><i>Messaggio:</i> {WebUtility.HtmlEncode(req.Message)}</p>") +
                   "<p>Apri l'app OnCallendar per accettare o rifiutare.</p>");
 
         return Ok(await ReloadDto(swap.Id));
     }
 
     public sealed record CreateSwapRequest(Guid MyShiftId, Guid OtherShiftId, string? Message);
+
+    // ---------- MULTI-DESTINATARIO GIVEAWAY ----------
+    public sealed record CreateMultiGiveawayRequest(Guid ShiftId, List<Guid> RecipientIds, string? Message);
+
+    /// <summary>
+    /// Crea una cessione verso uno o più colleghi contemporaneamente.
+    /// Il primo che accetta prende il turno; tutte le altre richieste pendenti
+    /// per quel turno vengono cancellate automaticamente.
+    /// </summary>
+    [HttpPost("giveaway-multi")]
+    public async Task<ActionResult<IEnumerable<SwapDto>>> CreateMultiGiveaway([FromBody] CreateMultiGiveawayRequest req)
+    {
+        if (_user.UserId is not Guid uid) return Unauthorized();
+        if (req.RecipientIds is null || req.RecipientIds.Count == 0)
+            return BadRequest(new { error = "Seleziona almeno un destinatario." });
+        if (req.RecipientIds.Contains(uid))
+            return BadRequest(new { error = "Non puoi cedere il turno a te stesso." });
+
+        var shift = await _db.Shifts.FirstOrDefaultAsync(s => s.Id == req.ShiftId);
+        if (shift is null) return NotFound(new { error = "Turno inesistente." });
+        if (shift.MedicoTurnoId != uid) return Forbid();
+        if (shift.StartUtc <= DateTime.UtcNow)
+            return BadRequest(new { error = "Turno già iniziato o passato." });
+
+        // Annulla eventuali richieste pendenti precedenti per questo turno
+        var existing = await _db.SwapRequests
+            .Where(r => r.InitiatorShiftId == shift.Id && r.Status == SwapRequestStatus.Pending)
+            .ToListAsync();
+        foreach (var ex in existing)
+        {
+            ex.Status = SwapRequestStatus.Cancelled;
+            ex.ResolvedAtUtc = DateTime.UtcNow;
+            ex.ResolutionReason = "Rimpiazzato da nuova richiesta";
+        }
+
+        var recipients = await _db.Users
+            .Where(u => req.RecipientIds.Contains(u.Id) && u.Id != uid)
+            .ToListAsync();
+        if (recipients.Count == 0)
+            return BadRequest(new { error = "Nessun destinatario valido trovato." });
+
+        var initiator = await _db.Users.FirstOrDefaultAsync(u => u.Id == uid);
+        var created = new List<SwapRequest>();
+
+        foreach (var to in recipients)
+        {
+            var swap = new SwapRequest
+            {
+                TenantId = shift.TenantId,
+                Type = SwapRequestType.Giveaway,
+                Status = SwapRequestStatus.Pending,
+                InitiatorMedicoId = uid,
+                InitiatorShiftId = shift.Id,
+                CounterpartMedicoId = to.Id,
+                Message = req.Message,
+                CreatedAtUtc = DateTime.UtcNow,
+            };
+            _db.SwapRequests.Add(swap);
+            _db.Notifications.Add(MakeNotif(shift.TenantId, to.Id, "SwapIncoming",
+                $"{FullName(initiator)} ti ha proposto il turno {shift.Code} del {shift.Date:dd/MM/yyyy}", swap.Id));
+            created.Add(swap);
+        }
+
+        _audit.Log("SwapRequest", Guid.NewGuid(), "MultiGiveawayCreated", shift.TenantId,
+            newValues: new { ShiftId = shift.Id, RecipientCount = created.Count });
+        await _db.SaveChangesAsync();
+
+        // Mail asincrona a ogni destinatario
+        foreach (var (swap, to) in created.Zip(recipients))
+        {
+            await SendSwapMailAsync(to, initiator,
+                $"[OnCallendar] Nuova richiesta turno da {FullName(initiator)}",
+                $"<p>Ciao {to.FirstName},</p>" +
+                $"<p><b>{FullName(initiator)}</b> ti ha proposto di prendere il suo turno " +
+                $"<b>{shift.Code}</b> del <b>{shift.Date:dd/MM/yyyy}</b>.</p>" +
+                (string.IsNullOrWhiteSpace(req.Message) ? string.Empty
+                    : $"<p><i>Messaggio:</i> {WebUtility.HtmlEncode(req.Message)}</p>") +
+                "<p>Apri l'app OnCallendar per accettare o rifiutare.</p>");
+        }
+
+        var ids = created.Select(s => s.Id).ToList();
+        var fresh = await LoadSwaps().Where(r => ids.Contains(r.Id)).ToListAsync();
+        return Ok(fresh.Select(Map));
+    }
 
     [HttpPost("swap")]
     public async Task<ActionResult<SwapDto>> CreateSwap([FromBody] CreateSwapRequest req)
@@ -191,6 +279,11 @@ public sealed class SwapRequestsController : ControllerBase
         _db.SwapRequests.Add(swap);
         _audit.Log("SwapRequest", swap.Id, "SwapCreated", mine.TenantId,
             newValues: new { swap.InitiatorShiftId, swap.CounterpartShiftId });
+
+        // Notifica alla controparte
+        var swapInitiator = await _db.Users.FirstOrDefaultAsync(u => u.Id == uid);
+        _db.Notifications.Add(MakeNotif(mine.TenantId, other.MedicoTurnoId!.Value, "SwapIncoming",
+            $"{FullName(swapInitiator)} ti ha proposto uno scambio turno del {mine.Date:dd/MM/yyyy}", swap.Id));
 
         await _db.SaveChangesAsync();
         return Ok(await ReloadDto(swap.Id));
@@ -253,9 +346,10 @@ public sealed class SwapRequestsController : ControllerBase
         swap.ResolvedAtUtc = DateTime.UtcNow;
         swap.ResolutionReason = body?.Reason;
         _audit.Log("SwapRequest", swap.Id, "Rejected", swap.TenantId, notes: body?.Reason);
+        _db.Notifications.Add(MakeNotif(swap.TenantId, swap.InitiatorMedicoId, "SwapRejected",
+            $"{FullName(swap.CounterpartMedico)} ha rifiutato il tuo turno del {swap.InitiatorShift.Date:dd/MM/yyyy}", swap.Id));
         await _db.SaveChangesAsync();
 
-        // Notifica all'iniziatore
         await SendSwapMailAsync(
             to: swap.InitiatorMedico,
             initiator: swap.CounterpartMedico,
@@ -263,7 +357,7 @@ public sealed class SwapRequestsController : ControllerBase
             body: $"<p>Ciao {swap.InitiatorMedico.FirstName},</p>" +
                   $"<p><b>{FullName(swap.CounterpartMedico)}</b> ha rifiutato la tua richiesta sul turno " +
                   $"<b>{swap.InitiatorShift.Code}</b> del <b>{swap.InitiatorShift.Date:dd/MM/yyyy}</b>.</p>" +
-                  (string.IsNullOrWhiteSpace(body?.Reason) ? string.Empty : $"<p><i>Motivo:</i> {System.Net.WebUtility.HtmlEncode(body!.Reason!)}</p>"));
+                  (string.IsNullOrWhiteSpace(body?.Reason) ? string.Empty : $"<p><i>Motivo:</i> {WebUtility.HtmlEncode(body!.Reason!)}</p>"));
 
         return Ok(Map(swap));
     }
@@ -281,9 +375,11 @@ public sealed class SwapRequestsController : ControllerBase
         swap.Status = SwapRequestStatus.Cancelled;
         swap.ResolvedAtUtc = DateTime.UtcNow;
         _audit.Log("SwapRequest", swap.Id, "Cancelled", swap.TenantId);
+        if (swap.CounterpartMedicoId.HasValue)
+            _db.Notifications.Add(MakeNotif(swap.TenantId, swap.CounterpartMedicoId.Value, "SwapCancelled",
+                $"{FullName(swap.InitiatorMedico)} ha annullato la richiesta sul turno {swap.InitiatorShift.Date:dd/MM/yyyy}", swap.Id));
         await _db.SaveChangesAsync();
 
-        // Notifica al counterpart (se c'era un destinatario)
         if (swap.CounterpartMedico is not null)
         {
             await SendSwapMailAsync(
@@ -412,10 +508,31 @@ public sealed class SwapRequestsController : ControllerBase
         _audit.Log("SwapRequest", swap.Id, "AutoApproved", swap.TenantId,
             newValues: new { swap.Type, swap.InitiatorShiftId, swap.CounterpartShiftId });
 
+        // Cancel siblings (altri giveaway pendenti per lo stesso turno → multi-destinatario)
+        var siblings = await _db.SwapRequests
+            .Where(r => r.InitiatorShiftId == swap.InitiatorShiftId
+                        && r.Status == SwapRequestStatus.Pending
+                        && r.Id != swap.Id)
+            .ToListAsync();
+        foreach (var sib in siblings)
+        {
+            sib.Status = SwapRequestStatus.Cancelled;
+            sib.ResolvedAtUtc = DateTime.UtcNow;
+            sib.ResolutionReason = "Turno già accettato da altro medico";
+            _audit.Log("SwapRequest", sib.Id, "AutoCancelled", swap.TenantId);
+            if (sib.CounterpartMedicoId.HasValue)
+                _db.Notifications.Add(MakeNotif(swap.TenantId, sib.CounterpartMedicoId.Value, "SwapAutoCancel",
+                    $"Il turno del {swap.InitiatorShift.Date:dd/MM/yyyy} è stato accettato da qualcun altro", sib.Id));
+        }
+
+        // Notifica all'iniziatore: accettato
+        _db.Notifications.Add(MakeNotif(swap.TenantId, swap.InitiatorMedicoId, "SwapAccepted",
+            $"{FullName(swap.CounterpartMedico)} ha accettato il tuo turno del {swap.InitiatorShift.Date:dd/MM/yyyy}", swap.Id));
+
         await _db.SaveChangesAsync();
         await tx.CommitAsync();
 
-        // Notifica all'iniziatore: la sua richiesta è stata accettata.
+        // Mail all'iniziatore
         await SendSwapMailAsync(
             to: swap.InitiatorMedico,
             initiator: swap.CounterpartMedico,
@@ -433,6 +550,13 @@ public sealed class SwapRequestsController : ControllerBase
     // ---------- MAIL HELPERS ----------
     private static string FullName(ApplicationUser? u) =>
         u is null ? "qualcuno" : $"{u.FirstName} {u.LastName}".Trim();
+
+    private Notification MakeNotif(Guid tenantId, Guid userId, string type, string message, Guid? relId = null) =>
+        new()
+        {
+            TenantId = tenantId, UserId = userId, Type = type, Message = message,
+            RelatedEntityId = relId, CreatedAtUtc = DateTime.UtcNow, IsRead = false,
+        };
 
     private async Task SendSwapMailAsync(
         ApplicationUser? to,

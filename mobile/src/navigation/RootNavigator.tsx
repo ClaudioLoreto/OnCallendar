@@ -11,10 +11,10 @@ import { useI18n } from '../i18n/I18nContext';
 
 import LoginScreen from '../screens/LoginScreen';
 import CalendarScreen from '../screens/CalendarScreen';
-import BoardScreen from '../screens/BoardScreen';
 import SwapsScreen from '../screens/SwapsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import HistoryScreen from '../screens/HistoryScreen';
+import NotificationsScreen from '../screens/NotificationsScreen';
 
 const Tabs = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -39,9 +39,8 @@ const MainTabs: React.FC = () => {
         tabBarLabelStyle: { fontWeight: '600' },
       }}
     >
-      <Tabs.Screen name="Calendar"  component={CalendarScreen} options={{ title: t('tabs.calendar'), tabBarIcon: tabIcon('📅') }} />
-      <Tabs.Screen name="Board"     component={BoardScreen}    options={{ title: t('tabs.board'),    tabBarIcon: tabIcon('📌') }} />
-      <Tabs.Screen name="Swaps"     component={SwapsScreen}    options={{ title: t('tabs.swaps'),    tabBarIcon: tabIcon('🔄') }} />
+      <Tabs.Screen name="Calendar" component={CalendarScreen} options={{ title: t('tabs.calendar'), tabBarIcon: tabIcon('📅') }} />
+      <Tabs.Screen name="Swaps"    component={SwapsScreen}    options={{ title: t('tabs.swaps'),    tabBarIcon: tabIcon('🔄') }} />
     </Tabs.Navigator>
   );
 };
@@ -81,9 +80,10 @@ const RootNavigator: React.FC = () => {
             headerTitleStyle: { fontWeight: '700' },
           }}
         >
-          <Stack.Screen name="Main"    component={MainTabs}      options={{ headerShown: false }} />
-          <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: t('profile.title'), presentation: 'modal' }} />
-          <Stack.Screen name="History" component={HistoryScreen} options={{ title: t('profile.section.history') }} />
+          <Stack.Screen name="Main"          component={MainTabs}           options={{ headerShown: false, headerBackTitle: '' }} />
+          <Stack.Screen name="Profile"       component={ProfileScreen}      options={{ title: t('profile.title'), headerBackTitle: '' }} />
+          <Stack.Screen name="History"       component={HistoryScreen}      options={{ title: t('profile.section.history'), headerBackTitle: '' }} />
+          <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifiche', headerBackTitle: '' }} />
         </Stack.Navigator>
       ) : (
         <Stack.Navigator screenOptions={{ headerShown: false }}>

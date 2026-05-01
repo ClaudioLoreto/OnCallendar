@@ -93,6 +93,16 @@ export type SwapDto = {
   resolvedAtUtc: string | null;
 };
 
+// ---------- Notifications ----------
+export type NotificationDto = {
+  id: string;
+  type: string;       // "SwapIncoming" | "SwapAccepted" | "SwapRejected" | "SwapCancelled" | "SwapAutoCancel"
+  message: string;
+  isRead: boolean;
+  relatedEntityId: string | null;
+  createdAtUtc: string;
+};
+
 // ---------- Users ----------
 
 export type MedicoDto = {
@@ -173,6 +183,9 @@ export const SwapsApi = {
   history:  () => apiClient.get<SwapDto[]>('/api/swaps/history').then(r => r.data),
   giveaway: (shiftId: string, toMedicoId: string, message?: string) =>
     apiClient.post<SwapDto>('/api/swaps/giveaway', { shiftId, toMedicoId, message }).then(r => r.data),
+  /** Cessione multi-destinatario: primo che accetta vince, gli altri vengono auto-cancellati. */
+  giveawayMulti: (shiftId: string, recipientIds: string[], message?: string) =>
+    apiClient.post<SwapDto[]>('/api/swaps/giveaway-multi', { shiftId, recipientIds, message }).then(r => r.data),
   swap: (myShiftId: string, otherShiftId: string, message?: string) =>
     apiClient.post<SwapDto>('/api/swaps/swap', { myShiftId, otherShiftId, message }).then(r => r.data),
   pick: (shiftId: string) =>
@@ -182,6 +195,13 @@ export const SwapsApi = {
   reject: (id: string, reason?: string) =>
     apiClient.post<SwapDto>(`/api/swaps/${id}/reject`, { reason }).then(r => r.data),
   cancel: (id: string) => apiClient.post<SwapDto>(`/api/swaps/${id}/cancel`).then(r => r.data),
+};
+
+export const NotificationsApi = {
+  list: () => apiClient.get<NotificationDto[]>('/api/notifications').then(r => r.data),
+  unreadCount: () => apiClient.get<{ count: number }>('/api/notifications/unread-count').then(r => r.data.count),
+  markRead: (id: string) => apiClient.post(`/api/notifications/${id}/read`),
+  markAllRead: () => apiClient.post('/api/notifications/mark-all-read'),
 };
 
 // ---------- Helpers ----------
