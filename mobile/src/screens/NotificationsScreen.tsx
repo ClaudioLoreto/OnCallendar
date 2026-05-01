@@ -14,6 +14,8 @@ const typeConfig = (type: string): { icon: string; color: string; label: string 
     case 'SwapRejected':   return { icon: 'close-circle-outline',     color: '#dc2626', label: 'Richiesta rifiutata' };
     case 'SwapCancelled':  return { icon: 'ban-outline',              color: '#6b7280', label: 'Richiesta annullata' };
     case 'SwapAutoCancel': return { icon: 'time-outline',             color: '#d97706', label: 'Turno già preso' };
+    case 'SwapCounter':         return { icon: 'repeat-outline',          color: '#7c3aed', label: 'Controproposta ricevuta' };
+    case 'SwapCounterRejected': return { icon: 'close-circle-outline',    color: '#dc2626', label: 'Controproposta rifiutata' };
     default:               return { icon: 'notifications-outline',    color: '#6b7280', label: type };
   }
 };

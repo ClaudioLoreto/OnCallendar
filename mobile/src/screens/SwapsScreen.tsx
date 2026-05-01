@@ -8,6 +8,7 @@ import {
 import AppHeader from '../components/AppHeader';
 import {
   CalendarApi, DayDto, MedicoDto, ShiftDto, SwapDto, SwapStatus, SwapsApi, UsersApi,
+  CounterOfferDto,
   formatDayLong, shiftCodeIcon, shiftCodeShort, shiftCodeTone, swapStatusLabel, swapStatusTone, swapTypeLabel,
 } from '../api/endpoints';
 import { useTheme } from '../theme/ThemeContext';
@@ -41,6 +42,15 @@ export default function SwapsScreen({ navigation }: Props) {
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [stepError, setStepError] = useState<string | null>(null);
+
+  // ----- Trattative -----
+  const [counterSwap, setCounterSwap] = useState<SwapDto | null>(null);
+  const [counterOffers, setCounterOffers] = useState<CounterOfferDto[]>([]);
+  const [counterDays, setCounterDays] = useState<DayDto[]>([]);
+  const [counterPicked, setCounterPicked] = useState<ShiftDto | null>(null);
+  const [counterMsg, setCounterMsg] = useState('');
+  const [counterBusy, setCounterBusy] = useState(false);
+  const [counterErr, setCounterErr] = useState<string | null>(null);
 
   const loadLists = useCallback(async () => {
     setError(null);
@@ -191,6 +201,95 @@ export default function SwapsScreen({ navigation }: Props) {
     }
   };
 
+  // ---- trattative ----
+  const openCounter = async (swap: SwapDto) => {
+    setCounterSwap(swap);
+    setCounterPicked(null);
+    setCounterMsg('');
+    setCounterErr(null);
+    setCounterOffers([]);
+    try {
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const to = new Date(today); to.setDate(to.getDate() + 30);
+      const [d, offers] = await Promise.all([
+        CalendarApi.list(today, to),
+        SwapsApi.listCounters(swap.id),
+      ]);
+      setCounterDays(d);
+      setCounterOffers(offers);
+    } catch (e: any) {
+      setCounterErr(e?.response?.data?.error ?? e?.message ?? 'Errore caricamento');
+    }
+  };
+
+  const myCounterShifts = useMemo<ShiftDto[]>(() => {
+    const out: ShiftDto[] = [];
+    for (const d of counterDays) for (const s of d.shifts) {
+      if (s.isMineTurno && !s.isPast) out.push(s);
+    }
+    return out;
+  }, [counterDays]);
+
+  const submitCounter = async () => {
+    if (!counterSwap || !counterPicked) return;
+    setCounterBusy(true); setCounterErr(null);
+    try {
+      await SwapsApi.proposeCounter(counterSwap.id, counterPicked.id, counterMsg || undefined);
+      setCounterSwap(null);
+      await loadLists();
+    } catch (e: any) {
+      setCounterErr(e?.response?.data?.error ?? e?.message ?? 'Errore invio');
+    } finally {
+      setCounterBusy(false);
+    }
+  };
+
+  const acceptCounterOffer = async (swapId: string, offerId: string) => {
+    setCounterBusy(true); setCounterErr(null);
+    try {
+      await SwapsApi.acceptCounter(swapId, offerId, false);
+      setCounterSwap(null);
+      await loadLists();
+    } catch (e: any) {
+      const data = e?.response?.data;
+      if (e?.response?.status === 422 && data?.canForce === true) {
+        const list = (data.violations ?? []).map((v: any) => `• ${v.message}`).join('\n');
+        Alert.alert('⚠️ Soglia di tutela superata', `${list}\n\nProcedere comunque?`, [
+          { text: 'Annulla', style: 'cancel' },
+          {
+            text: 'Sì, accetto', style: 'destructive',
+            onPress: async () => {
+              try {
+                await SwapsApi.acceptCounter(swapId, offerId, true);
+                setCounterSwap(null);
+                await loadLists();
+              } catch (e2: any) {
+                setCounterErr(e2?.response?.data?.error ?? e2?.message ?? 'Errore');
+              }
+            },
+          },
+        ]);
+      } else {
+        setCounterErr(data?.error ?? e?.message ?? 'Errore');
+      }
+    } finally {
+      setCounterBusy(false);
+    }
+  };
+
+  const rejectCounterOffer = async (swapId: string, offerId: string) => {
+    setCounterBusy(true); setCounterErr(null);
+    try {
+      await SwapsApi.rejectCounter(swapId, offerId);
+      const fresh = await SwapsApi.listCounters(swapId);
+      setCounterOffers(fresh);
+    } catch (e: any) {
+      setCounterErr(e?.response?.data?.error ?? e?.message ?? 'Errore');
+    } finally {
+      setCounterBusy(false);
+    }
+  };
+
   const list = tab === 'incoming' ? incoming : outgoing;
 
   const briefLabel = (s: { date: string; code: string; startUtc: string; endUtc: string }) => {
@@ -262,27 +361,31 @@ export default function SwapsScreen({ navigation }: Props) {
                 ) : null}
 
                 {item.status === SwapStatus.Pending ? (
-                  <View style={{ marginTop: theme.spacing.m, flexDirection: 'row', gap: theme.spacing.s }}>
-                    {isIncoming ? (
-                      <>
+                  <View style={{ marginTop: theme.spacing.m, gap: theme.spacing.s }}>
+                    <View style={{ flexDirection: 'row', gap: theme.spacing.s }}>
+                      {isIncoming ? (
+                        <>
+                          <View style={{ flex: 1 }}>
+                            <Button title={t('swaps.accept')} icon="checkmark"
+                              loading={busy === item.id}
+                              onPress={() => decide(item.id, 'accept')} />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Button title={t('swaps.reject')} variant="danger" icon="close"
+                              loading={busy === item.id}
+                              onPress={() => decide(item.id, 'reject')} />
+                          </View>
+                        </>
+                      ) : (
                         <View style={{ flex: 1 }}>
-                          <Button title={t('swaps.accept')} icon="checkmark"
+                          <Button title={t('swaps.cancel')} variant="subtle" icon="trash-outline"
                             loading={busy === item.id}
-                            onPress={() => decide(item.id, 'accept')} />
+                            onPress={() => decide(item.id, 'cancel')} />
                         </View>
-                        <View style={{ flex: 1 }}>
-                          <Button title={t('swaps.reject')} variant="danger" icon="close"
-                            loading={busy === item.id}
-                            onPress={() => decide(item.id, 'reject')} />
-                        </View>
-                      </>
-                    ) : (
-                      <View style={{ flex: 1 }}>
-                        <Button title={t('swaps.cancel')} variant="subtle" icon="trash-outline"
-                          loading={busy === item.id}
-                          onPress={() => decide(item.id, 'cancel')} />
-                      </View>
-                    )}
+                      )}
+                    </View>
+                    <Button title="Controproposta" variant="subtle" icon="repeat-outline"
+                      onPress={() => openCounter(item)} />
                   </View>
                 ) : null}
               </Card>
@@ -507,6 +610,124 @@ export default function SwapsScreen({ navigation }: Props) {
               />
             </View>
           </View>
+        </ScrollView>
+      </Sheet>
+
+      {/* Sheet trattativa / controproposte */}
+      <Sheet visible={!!counterSwap} onClose={() => setCounterSwap(null)} title="Trattativa">
+        <ScrollView>
+          {counterSwap ? (
+            <>
+              <View style={{ backgroundColor: theme.colors.surfaceAlt, padding: theme.spacing.m, borderRadius: theme.radius.m, marginBottom: theme.spacing.m }}>
+                <Text style={[theme.typography.caption, { fontWeight: '700' }]}>Richiesta originale</Text>
+                <Text style={theme.typography.body}>{briefLabel(counterSwap.initiatorShift)}</Text>
+                <Text style={theme.typography.caption}>
+                  da {counterSwap.initiatorName}{counterSwap.counterpartName ? ` → ${counterSwap.counterpartName}` : ''}
+                </Text>
+              </View>
+
+              <Text style={[theme.typography.body, { fontWeight: '700', marginBottom: theme.spacing.s }]}>
+                Controproposte ({counterOffers.length})
+              </Text>
+              {counterOffers.length === 0 ? (
+                <Text style={[theme.typography.caption, { marginBottom: theme.spacing.m }]}>
+                  Nessuna controproposta ancora.
+                </Text>
+              ) : (
+                <View style={{ gap: theme.spacing.s, marginBottom: theme.spacing.m }}>
+                  {counterOffers.map(o => {
+                    const mine = o.proposedById === user?.id;
+                    return (
+                      <View key={o.id} style={{
+                        padding: theme.spacing.m, borderRadius: theme.radius.m,
+                        backgroundColor: mine ? theme.colors.accent : theme.colors.surface,
+                        borderWidth: 1, borderColor: theme.colors.border,
+                      }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <Text style={{ fontWeight: '700' }}>{mine ? 'Tu' : o.proposedByName}</Text>
+                          <Badge label={o.status}
+                            tone={o.status === 'Pending' ? 'warning' : o.status === 'Accepted' ? 'success' : 'neutral' as any} />
+                        </View>
+                        <Text style={theme.typography.body}>Offre: {briefLabel(o.offeredShift)}</Text>
+                        {o.message ? (
+                          <Text style={[theme.typography.caption, { fontStyle: 'italic', marginTop: 4 }]}>«{o.message}»</Text>
+                        ) : null}
+                        {o.status === 'Pending' && !mine ? (
+                          <View style={{ flexDirection: 'row', gap: theme.spacing.s, marginTop: theme.spacing.s }}>
+                            <View style={{ flex: 1 }}>
+                              <Button title="Accetta" icon="checkmark" loading={counterBusy}
+                                onPress={() => acceptCounterOffer(counterSwap.id, o.id)} />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Button title="Rifiuta" variant="danger" icon="close" loading={counterBusy}
+                                onPress={() => rejectCounterOffer(counterSwap.id, o.id)} />
+                            </View>
+                          </View>
+                        ) : null}
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+
+              <Text style={[theme.typography.body, { fontWeight: '700', marginBottom: theme.spacing.s, marginTop: theme.spacing.s }]}>
+                Proponi un tuo turno in cambio
+              </Text>
+              {myCounterShifts.length === 0 ? (
+                <View style={{ padding: theme.spacing.m, backgroundColor: theme.colors.surfaceAlt, borderRadius: theme.radius.m, marginBottom: theme.spacing.m }}>
+                  <Text style={theme.typography.caption}>Non hai turni futuri da offrire nei prossimi 30 giorni.</Text>
+                </View>
+              ) : (
+                <View style={{ gap: 8, marginBottom: theme.spacing.m }}>
+                  {myCounterShifts.map(s => {
+                    const active = counterPicked?.id === s.id;
+                    return (
+                      <TouchableOpacity
+                        key={s.id}
+                        onPress={() => setCounterPicked(s)}
+                        style={{
+                          flexDirection: 'row', alignItems: 'center', gap: 10,
+                          borderWidth: 1,
+                          borderColor: active ? theme.colors.primary : theme.colors.border,
+                          backgroundColor: active ? theme.colors.accent : theme.colors.surface,
+                          borderRadius: theme.radius.m, paddingHorizontal: 12, paddingVertical: 10,
+                        }}
+                      >
+                        <Icon name={shiftCodeIcon(s.code) as any} size={18} color={theme.colors.primary} />
+                        <Badge label={s.code} tone={shiftCodeTone(s.code) as any} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: active ? theme.colors.primary : theme.colors.textPrimary, fontWeight: '600', textTransform: 'capitalize' }}>
+                            {formatDayLong(s.date, locale === 'it' ? 'it-IT' : 'en-GB')}
+                          </Text>
+                          <Text style={theme.typography.caption}>
+                            {shiftCodeShort(s.code)} · {s.startLocal} – {s.endLocal}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+
+              <Field label="Messaggio (opzionale)" value={counterMsg} onChangeText={setCounterMsg} multiline />
+
+              {counterErr ? (
+                <Text style={{ color: theme.colors.danger, marginVertical: theme.spacing.s }}>{counterErr}</Text>
+              ) : null}
+
+              <View style={{ flexDirection: 'row', gap: theme.spacing.s, marginTop: theme.spacing.m }}>
+                <View style={{ flex: 1 }}>
+                  <Button title="Chiudi" variant="subtle" onPress={() => setCounterSwap(null)} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Button title="Proponi" icon="send"
+                    loading={counterBusy}
+                    disabled={!counterPicked}
+                    onPress={submitCounter} />
+                </View>
+              </View>
+            </>
+          ) : null}
         </ScrollView>
       </Sheet>
     </SafeAreaView>

@@ -24,6 +24,7 @@ public class ApplicationDbContext
     public DbSet<SwapRequest> SwapRequests => Set<SwapRequest>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<SwapCounterOffer> SwapCounterOffers => Set<SwapCounterOffer>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -51,5 +52,8 @@ public class ApplicationDbContext
 
         builder.Entity<Notification>().HasQueryFilter(n =>
             currentTenantId == null || n.TenantId == currentTenantId);
+
+        builder.Entity<SwapCounterOffer>().HasQueryFilter(o =>
+            currentTenantId == null || o.TenantId == currentTenantId);
     }
 }

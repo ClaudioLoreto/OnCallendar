@@ -547,6 +547,173 @@ public sealed class SwapRequestsController : ControllerBase
         return Ok(await ReloadDto(swap.Id));
     }
 
+    // ---------- TRATTATIVE / CONTROPROPOSTE ----------
+
+    public sealed record CounterOfferDto(
+        Guid Id, Guid SwapRequestId,
+        Guid ProposedById, string ProposedByName,
+        ShiftBriefDto OfferedShift,
+        string? Message, string Status,
+        DateTime CreatedAtUtc, DateTime? ResolvedAtUtc);
+
+    private CounterOfferDto MapOffer(SwapCounterOffer o) => new(
+        o.Id, o.SwapRequestId,
+        o.ProposedByMedicoId, $"{o.ProposedByMedico.FirstName} {o.ProposedByMedico.LastName}",
+        Brief(o.OfferedShift), o.Message, o.Status, o.CreatedAtUtc, o.ResolvedAtUtc);
+
+    [HttpGet("{id:guid}/counter-offers")]
+    public async Task<ActionResult<IEnumerable<CounterOfferDto>>> ListCounterOffers(Guid id)
+    {
+        if (_user.UserId is not Guid uid) return Unauthorized();
+        var swap = await _db.SwapRequests.FirstOrDefaultAsync(r => r.Id == id);
+        if (swap is null) return NotFound();
+        if (swap.InitiatorMedicoId != uid && swap.CounterpartMedicoId != uid) return Forbid();
+
+        var offers = await _db.SwapCounterOffers
+            .Include(o => o.ProposedByMedico)
+            .Include(o => o.OfferedShift)
+            .Where(o => o.SwapRequestId == id)
+            .OrderBy(o => o.CreatedAtUtc)
+            .ToListAsync();
+        return Ok(offers.Select(MapOffer));
+    }
+
+    public sealed record CreateCounterOfferRequest(Guid OfferedShiftId, string? Message);
+
+    /// <summary>
+    /// Propone un turno DIVERSO al posto di quello richiesto.
+    /// Può essere chiamato sia dal counterpart (risposta) sia dall'initiator
+    /// (controproposta alla controproposta) → ping-pong illimitato.
+    /// </summary>
+    [HttpPost("{id:guid}/counter")]
+    public async Task<ActionResult<CounterOfferDto>> ProposeCounter(Guid id, [FromBody] CreateCounterOfferRequest req)
+    {
+        if (_user.UserId is not Guid uid) return Unauthorized();
+        var swap = await LoadSwaps().FirstOrDefaultAsync(r => r.Id == id);
+        if (swap is null) return NotFound();
+        if (swap.InitiatorMedicoId != uid && swap.CounterpartMedicoId != uid) return Forbid();
+        if (swap.Status != SwapRequestStatus.Pending)
+            return BadRequest(new { error = "La richiesta non è più trattabile." });
+
+        var shift = await _db.Shifts.FirstOrDefaultAsync(s => s.Id == req.OfferedShiftId);
+        if (shift is null) return NotFound(new { error = "Turno offerto inesistente." });
+        if (shift.MedicoTurnoId != uid)
+            return BadRequest(new { error = "Puoi offrire solo turni di cui sei medico di turno." });
+        if (shift.StartUtc <= DateTime.UtcNow)
+            return BadRequest(new { error = "Il turno offerto è già iniziato." });
+
+        // Marca le controproposte precedenti come superate
+        var previous = await _db.SwapCounterOffers
+            .Where(o => o.SwapRequestId == id && o.Status == "Pending")
+            .ToListAsync();
+        foreach (var p in previous)
+        {
+            p.Status = "Superseded";
+            p.ResolvedAtUtc = DateTime.UtcNow;
+        }
+
+        var offer = new SwapCounterOffer
+        {
+            TenantId = swap.TenantId,
+            SwapRequestId = swap.Id,
+            ProposedByMedicoId = uid,
+            OfferedShiftId = shift.Id,
+            Message = req.Message,
+            Status = "Pending",
+            CreatedAtUtc = DateTime.UtcNow,
+        };
+        _db.SwapCounterOffers.Add(offer);
+        _audit.Log("SwapCounterOffer", offer.Id, "Created", swap.TenantId,
+            newValues: new { swap.Id, offer.OfferedShiftId, offer.ProposedByMedicoId });
+
+        // Notifica all'altra parte
+        var otherUserId = uid == swap.InitiatorMedicoId
+            ? swap.CounterpartMedicoId
+            : swap.InitiatorMedicoId;
+        if (otherUserId.HasValue)
+        {
+            var meName = uid == swap.InitiatorMedicoId
+                ? FullName(swap.InitiatorMedico)
+                : FullName(swap.CounterpartMedico);
+            _db.Notifications.Add(MakeNotif(swap.TenantId, otherUserId.Value, "SwapCounter",
+                $"{meName} ti ha proposto in cambio il turno {shift.Code} del {shift.Date:dd/MM/yyyy}", swap.Id));
+        }
+
+        await _db.SaveChangesAsync();
+
+        var fresh = await _db.SwapCounterOffers
+            .Include(o => o.ProposedByMedico).Include(o => o.OfferedShift)
+            .FirstAsync(o => o.Id == offer.Id);
+        return Ok(MapOffer(fresh));
+    }
+
+    /// <summary>
+    /// Accetta una controproposta: il SwapRequest diventa di tipo Swap a tutti
+    /// gli effetti (con la nuova contropartita), e viene risolto subito.
+    /// </summary>
+    [HttpPost("{swapId:guid}/counter/{offerId:guid}/accept")]
+    public async Task<ActionResult<SwapDto>> AcceptCounter(Guid swapId, Guid offerId, [FromQuery] bool force = false)
+    {
+        if (_user.UserId is not Guid uid) return Unauthorized();
+        var swap = await LoadSwaps().FirstOrDefaultAsync(r => r.Id == swapId);
+        if (swap is null) return NotFound();
+        if (swap.Status != SwapRequestStatus.Pending)
+            return BadRequest(new { error = "Richiesta non più pendente." });
+
+        var offer = await _db.SwapCounterOffers
+            .Include(o => o.OfferedShift).Include(o => o.ProposedByMedico)
+            .FirstOrDefaultAsync(o => o.Id == offerId && o.SwapRequestId == swapId);
+        if (offer is null) return NotFound();
+        if (offer.Status != "Pending") return BadRequest(new { error = "Controproposta non più valida." });
+
+        // Solo l'altra parte può accettare la controproposta
+        if (offer.ProposedByMedicoId == uid)
+            return BadRequest(new { error = "Devi attendere la risposta dell'altro medico." });
+        if (uid != swap.InitiatorMedicoId && uid != swap.CounterpartMedicoId) return Forbid();
+
+        // Trasformo lo swap in uno scambio "Swap" con la nuova contropartita
+        swap.Type = SwapRequestType.Swap;
+        swap.CounterpartShiftId = offer.OfferedShiftId;
+        swap.CounterpartShift = offer.OfferedShift;
+        // Il counterpart è chi ha offerto
+        swap.CounterpartMedicoId = offer.ProposedByMedicoId;
+        swap.CounterpartMedico = offer.ProposedByMedico;
+
+        offer.Status = "Accepted";
+        offer.ResolvedAtUtc = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+
+        // Riuso ResolveAcceptance per applicare regole + scambio + audit + notifiche
+        // ATTENZIONE: ResolveAcceptance richiede che chi chiama sia il counterpart.
+        // Dato che abbiamo appena impostato counterpart = chi accetta (cioè uid),
+        // la chiamata è coerente.
+        return await ResolveAcceptance(swap.Id, force);
+    }
+
+    [HttpPost("{swapId:guid}/counter/{offerId:guid}/reject")]
+    public async Task<IActionResult> RejectCounter(Guid swapId, Guid offerId)
+    {
+        if (_user.UserId is not Guid uid) return Unauthorized();
+        var swap = await _db.SwapRequests.FirstOrDefaultAsync(r => r.Id == swapId);
+        if (swap is null) return NotFound();
+        var offer = await _db.SwapCounterOffers.FirstOrDefaultAsync(o => o.Id == offerId && o.SwapRequestId == swapId);
+        if (offer is null) return NotFound();
+        if (offer.ProposedByMedicoId == uid)
+            return BadRequest(new { error = "Non puoi rifiutare la tua stessa proposta." });
+        if (uid != swap.InitiatorMedicoId && uid != swap.CounterpartMedicoId) return Forbid();
+        if (offer.Status != "Pending") return BadRequest(new { error = "Controproposta non più valida." });
+
+        offer.Status = "Rejected";
+        offer.ResolvedAtUtc = DateTime.UtcNow;
+
+        _db.Notifications.Add(MakeNotif(swap.TenantId, offer.ProposedByMedicoId, "SwapCounterRejected",
+            "La tua controproposta è stata rifiutata", swap.Id));
+
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
     // ---------- MAIL HELPERS ----------
     private static string FullName(ApplicationUser? u) =>
         u is null ? "qualcuno" : $"{u.FirstName} {u.LastName}".Trim();

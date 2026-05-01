@@ -96,11 +96,24 @@ export type SwapDto = {
 // ---------- Notifications ----------
 export type NotificationDto = {
   id: string;
-  type: string;       // "SwapIncoming" | "SwapAccepted" | "SwapRejected" | "SwapCancelled" | "SwapAutoCancel"
+  type: string;       // "SwapIncoming" | "SwapAccepted" | "SwapRejected" | "SwapCancelled" | "SwapAutoCancel" | "SwapCounter" | "SwapCounterRejected"
   message: string;
   isRead: boolean;
   relatedEntityId: string | null;
   createdAtUtc: string;
+};
+
+// ---------- Counter Offers (trattative) ----------
+export type CounterOfferDto = {
+  id: string;
+  swapRequestId: string;
+  proposedById: string;
+  proposedByName: string;
+  offeredShift: ShiftBriefDto;
+  message: string | null;
+  status: 'Pending' | 'Accepted' | 'Rejected' | 'Superseded';
+  createdAtUtc: string;
+  resolvedAtUtc: string | null;
 };
 
 // ---------- Users ----------
@@ -195,6 +208,16 @@ export const SwapsApi = {
   reject: (id: string, reason?: string) =>
     apiClient.post<SwapDto>(`/api/swaps/${id}/reject`, { reason }).then(r => r.data),
   cancel: (id: string) => apiClient.post<SwapDto>(`/api/swaps/${id}/cancel`).then(r => r.data),
+
+  // Trattative
+  listCounters: (swapId: string) =>
+    apiClient.get<CounterOfferDto[]>(`/api/swaps/${swapId}/counter-offers`).then(r => r.data),
+  proposeCounter: (swapId: string, offeredShiftId: string, message?: string) =>
+    apiClient.post<CounterOfferDto>(`/api/swaps/${swapId}/counter`, { offeredShiftId, message }).then(r => r.data),
+  acceptCounter: (swapId: string, offerId: string, force = false) =>
+    apiClient.post<SwapDto>(`/api/swaps/${swapId}/counter/${offerId}/accept${force ? '?force=true' : ''}`).then(r => r.data),
+  rejectCounter: (swapId: string, offerId: string) =>
+    apiClient.post(`/api/swaps/${swapId}/counter/${offerId}/reject`),
 };
 
 export const NotificationsApi = {
