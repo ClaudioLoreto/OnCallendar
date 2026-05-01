@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { FlatList, RefreshControl, SafeAreaView, Text, View } from 'react-native';
+import { FlatList, RefreshControl, SafeAreaView, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { EmptyState } from '../components/ui';
 import { useTheme } from '../theme/ThemeContext';
@@ -58,15 +58,27 @@ export default function NotificationsScreen({ navigation }: Props) {
         ) : null}
         renderItem={({ item }) => {
           const cfg = typeConfig(item.type);
+          const isSwap = item.type.startsWith('Swap') && !!item.relatedEntityId;
+          const onPress = () => {
+            if (!isSwap) return;
+            navigation.navigate('Main', {
+              screen: 'Swaps',
+              params: { openSwapId: item.relatedEntityId },
+            });
+          };
           return (
-            <View style={{
-              flexDirection: 'row', alignItems: 'flex-start', gap: 12,
-              backgroundColor: item.isRead ? theme.colors.surface : theme.colors.accent,
-              borderRadius: theme.radius.l,
-              padding: theme.spacing.m,
-              marginBottom: theme.spacing.s,
-              ...theme.shadows.card,
-            }}>
+            <TouchableOpacity
+              activeOpacity={isSwap ? 0.7 : 1}
+              onPress={onPress}
+              disabled={!isSwap}
+              style={{
+                flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+                backgroundColor: item.isRead ? theme.colors.surface : theme.colors.accent,
+                borderRadius: theme.radius.l,
+                padding: theme.spacing.m,
+                marginBottom: theme.spacing.s,
+                ...theme.shadows.card,
+              }}>
               <View style={{
                 width: 38, height: 38, borderRadius: 19,
                 backgroundColor: cfg.color + '18',
@@ -87,7 +99,7 @@ export default function NotificationsScreen({ navigation }: Props) {
                   backgroundColor: theme.colors.primary, marginTop: 5,
                 }} />
               ) : null}
-            </View>
+            </TouchableOpacity>
           );
         }}
       />

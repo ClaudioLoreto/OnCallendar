@@ -38,6 +38,9 @@ public class SwapRequest : BaseEntity, ITenantScoped, ISoftDeletable
     /// <summary>Motivo blocco / rigetto (es. messaggio dal Rule Engine).</summary>
     public string? ResolutionReason { get; set; }
 
+    /// <summary>Trattative ping-pong associate.</summary>
+    public ICollection<SwapCounterOffer> CounterOffers { get; set; } = new List<SwapCounterOffer>();
+
     // Soft delete
     public bool IsDeleted { get; set; }
     public DateTime? DeletedAtUtc { get; set; }

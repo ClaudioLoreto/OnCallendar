@@ -1,50 +1,36 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   FlatList, RefreshControl, SafeAreaView, ScrollView, Text, TouchableOpacity, View,
 } from 'react-native';
-import { Avatar, Badge, Button, Card, EmptyState, Field, Icon, Sheet } from '../components/ui';
+import { Avatar, Badge, Button, Card, EmptyState, Icon, Sheet } from '../components/ui';
 import AppHeader from '../components/AppHeader';
 import {
-  CalendarApi, DayDto, MedicoDto, ShiftDto, ShiftStatus, ShiftsApi, SwapsApi, UsersApi,
+  CalendarApi, DayDto, ShiftDto, ShiftStatus, ShiftsApi,
   shiftCodeIcon, shiftCodeShort, shiftCodeTone,
 } from '../api/endpoints';
 import { useTheme } from '../theme/ThemeContext';
 import { useI18n } from '../i18n/I18nContext';
-import { useAuth } from '../auth/AuthContext';
 
-type Props = { navigation: { navigate: (route: string) => void } };
+type Props = { navigation: { navigate: (route: string, params?: any) => void } };
 
 export default function CalendarScreen({ navigation }: Props) {
   const { theme } = useTheme();
   const { t, locale } = useI18n();
-  const { user } = useAuth();
 
   const [days, setDays] = useState<DayDto[]>([]);
-  const [medici, setMedici] = useState<MedicoDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Sheet azioni sul mio turno
   const [actionShift, setActionShift] = useState<ShiftDto | null>(null);
-  const [actionBusy, setActionBusy] = useState(false);
-
-  // Sheet "cedi a un collega"
-  const [giveShift, setGiveShift] = useState<ShiftDto | null>(null);
-  const [giveMessage, setGiveMessage] = useState('');
-  const [giveBusy, setGiveBusy] = useState(false);
-  const [giveError, setGiveError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const to = new Date(today); to.setDate(to.getDate() + 14);
-    const [d, m] = await Promise.all([
-      CalendarApi.list(today, to),
-      UsersApi.medici(),
-    ]);
+    const d = await CalendarApi.list(today, to);
     setDays(d);
-    setMedici(m);
   }, []);
 
   useEffect(() => {
@@ -82,52 +68,16 @@ export default function CalendarScreen({ navigation }: Props) {
     return `${wd} · ${short}`;
   };
 
-  const colleagues = medici.filter(m => m.id !== user?.userId);
-
   // ---- Azioni sul mio turno ----
   const openActions = (s: ShiftDto) => {
     if (!s.isMineTurno || s.isPast) return;
     setActionShift(s);
   };
-  const togglePublish = async () => {
+  const goToWizard = (mode: 'cessione' | 'scambio') => {
     if (!actionShift) return;
-    setActionBusy(true);
-    try {
-      if (actionShift.status === ShiftStatus.OnBoard) {
-        await ShiftsApi.unpublish(actionShift.id);
-      } else {
-        await ShiftsApi.publish(actionShift.id);
-      }
-      setActionShift(null);
-      await load();
-    } catch (e: any) {
-      // mostralo nel banner globale
-      setError(e?.response?.data?.error ?? e?.message ?? 'Errore');
-    } finally {
-      setActionBusy(false);
-    }
-  };
-  const startGiveaway = () => {
-    if (!actionShift) return;
-    setGiveShift(actionShift);
+    const id = actionShift.id;
     setActionShift(null);
-    setGiveMessage('');
-    setGiveError(null);
-  };
-  const submitGiveaway = async (toMedicoId: string) => {
-    if (!giveShift) return;
-    setGiveBusy(true); setGiveError(null);
-    try {
-      await SwapsApi.giveaway(giveShift.id, toMedicoId, giveMessage || undefined);
-      setGiveShift(null);
-      await load();
-    } catch (e: any) {
-      const code = e?.response?.status;
-      const msg = e?.response?.data?.error ?? e?.message ?? 'Errore';
-      setGiveError(code === 409 ? 'Hai già una richiesta in sospeso per questo turno.' : msg);
-    } finally {
-      setGiveBusy(false);
-    }
+    navigation.navigate('Swaps', { initialShiftId: id, initialMode: mode });
   };
 
   // ---- Render ----
@@ -270,9 +220,15 @@ export default function CalendarScreen({ navigation }: Props) {
 
             <View style={{ gap: theme.spacing.s }}>
               <Button
-                title="Cedi a un collega"
-                icon="person-add-outline"
-                onPress={startGiveaway}
+                title="Proponi cessione"
+                icon="arrow-forward-circle-outline"
+                onPress={() => goToWizard('cessione')}
+              />
+              <Button
+                title="Proponi scambio"
+                icon="swap-horizontal-outline"
+                variant="secondary"
+                onPress={() => goToWizard('scambio')}
               />
               <Button
                 title="Annulla"
@@ -281,44 +237,6 @@ export default function CalendarScreen({ navigation }: Props) {
                 onPress={() => setActionShift(null)}
               />
             </View>
-          </ScrollView>
-        ) : null}
-      </Sheet>
-
-      {/* Sheet giveaway */}
-      <Sheet visible={!!giveShift} onClose={() => setGiveShift(null)} title="Cedi questo turno">
-        {giveShift ? (
-          <ScrollView>
-            <Text style={[theme.typography.caption, { marginBottom: theme.spacing.m }]}>
-              {dayHeader(giveShift.date)} · {giveShift.codeLabel} · {giveShift.startLocal} – {giveShift.endLocal}
-            </Text>
-            <Field label="Messaggio (opzionale)" value={giveMessage} onChangeText={setGiveMessage} multiline />
-            <Text style={[theme.typography.body, { fontWeight: '600', marginBottom: theme.spacing.s }]}>
-              Scegli un collega
-            </Text>
-            {colleagues.length === 0 ? (
-              <Text style={theme.typography.caption}>Nessun collega disponibile.</Text>
-            ) : colleagues.map(m => (
-              <TouchableOpacity
-                key={m.id}
-                onPress={() => submitGiveaway(m.id)}
-                disabled={giveBusy}
-                style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 12,
-                  borderWidth: 1, borderColor: theme.colors.border,
-                  borderRadius: theme.radius.m, padding: theme.spacing.m,
-                  marginBottom: theme.spacing.s, backgroundColor: theme.colors.surface,
-                  opacity: giveBusy ? 0.6 : 1,
-                }}
-              >
-                <Avatar fullName={m.fullName} url={m.avatarUrl} size={32} />
-                <Text style={[theme.typography.body, { flex: 1 }]}>{m.fullName}</Text>
-                <Icon name="chevron-forward" size={18} color={theme.colors.textMuted} />
-              </TouchableOpacity>
-            ))}
-            {giveError ? (
-              <Text style={{ color: theme.colors.danger, marginTop: theme.spacing.s }}>{giveError}</Text>
-            ) : null}
           </ScrollView>
         ) : null}
       </Sheet>

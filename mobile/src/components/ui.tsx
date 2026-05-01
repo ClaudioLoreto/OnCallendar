@@ -2,7 +2,9 @@ import React from 'react';
 import {
   ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -224,31 +226,36 @@ export const Sheet: React.FC<{
   const { theme } = useTheme();
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable
-        style={{ flex: 1, backgroundColor: theme.colors.overlay, justifyContent: 'flex-end' }}
-        onPress={onClose}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
       >
         <Pressable
-          style={{
-            backgroundColor: theme.colors.surface,
-            borderTopLeftRadius: theme.radius.xl,
-            borderTopRightRadius: theme.radius.xl,
-            padding: theme.spacing.l,
-            paddingBottom: theme.spacing.xxl,
-            maxHeight: '85%',
-          }}
-          onPress={() => { /* swallow */ }}
+          style={{ flex: 1, backgroundColor: theme.colors.overlay, justifyContent: 'flex-end' }}
+          onPress={onClose}
         >
-          <View style={{
-            alignSelf: 'center', width: 40, height: 5, borderRadius: 3,
-            backgroundColor: theme.colors.border, marginBottom: theme.spacing.m,
-          }} />
-          {title ? (
-            <Text style={[theme.typography.h2, { marginBottom: theme.spacing.m }]}>{title}</Text>
-          ) : null}
-          {children}
+          <Pressable
+            style={{
+              backgroundColor: theme.colors.surface,
+              borderTopLeftRadius: theme.radius.xl,
+              borderTopRightRadius: theme.radius.xl,
+              padding: theme.spacing.l,
+              paddingBottom: theme.spacing.xxl,
+              maxHeight: '85%',
+            }}
+            onPress={() => { /* swallow */ }}
+          >
+            <View style={{
+              alignSelf: 'center', width: 40, height: 5, borderRadius: 3,
+              backgroundColor: theme.colors.border, marginBottom: theme.spacing.m,
+            }} />
+            {title ? (
+              <Text style={[theme.typography.h2, { marginBottom: theme.spacing.m }]}>{title}</Text>
+            ) : null}
+            {children}
+          </Pressable>
         </Pressable>
-      </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };

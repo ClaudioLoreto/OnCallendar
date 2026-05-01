@@ -45,7 +45,8 @@ public sealed class SwapRequestsController : ControllerBase
         Guid? CounterpartId, string? CounterpartName,
         ShiftBriefDto? CounterpartShift,
         string? Message, string? ResolutionReason,
-        DateTime CreatedAtUtc, DateTime? ResolvedAtUtc);
+        DateTime CreatedAtUtc, DateTime? ResolvedAtUtc,
+        int PendingCounterOffersCount);
 
     private static ShiftBriefDto Brief(Shift s) => new(
         s.Id, s.Date.ToString("yyyy-MM-dd"), s.Code.ToString(), s.StartUtc, s.EndUtc);
@@ -57,13 +58,15 @@ public sealed class SwapRequestsController : ControllerBase
         r.CounterpartMedicoId,
         r.CounterpartMedico is null ? null : $"{r.CounterpartMedico.FirstName} {r.CounterpartMedico.LastName}",
         r.CounterpartShift is null ? null : Brief(r.CounterpartShift),
-        r.Message, r.ResolutionReason, r.CreatedAtUtc, r.ResolvedAtUtc);
+        r.Message, r.ResolutionReason, r.CreatedAtUtc, r.ResolvedAtUtc,
+        r.CounterOffers?.Count(o => o.Status == "Pending") ?? 0);
 
     private IQueryable<SwapRequest> LoadSwaps() => _db.SwapRequests
         .Include(r => r.InitiatorMedico)
         .Include(r => r.CounterpartMedico)
         .Include(r => r.InitiatorShift)
-        .Include(r => r.CounterpartShift);
+        .Include(r => r.CounterpartShift)
+        .Include(r => r.CounterOffers);
 
     // ---------- LIST ----------
     [HttpGet("incoming")]
@@ -486,12 +489,12 @@ public sealed class SwapRequestsController : ControllerBase
     }
 
     // ---------- CORE ----------
-    private async Task<ActionResult<SwapDto>> ResolveAcceptance(Guid swapId, bool force = false)
+    private async Task<ActionResult<SwapDto>> ResolveAcceptance(Guid swapId, bool force = false, bool skipCallerAuthCheck = false)
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
         var swap = await LoadSwaps().FirstOrDefaultAsync(r => r.Id == swapId);
         if (swap is null) return NotFound();
-        if (swap.CounterpartMedicoId != uid) return Forbid();
+        if (!skipCallerAuthCheck && swap.CounterpartMedicoId != uid) return Forbid();
         if (swap.Status != SwapRequestStatus.Pending)
             return BadRequest(new { error = "Richiesta non più pendente." });
 
@@ -775,11 +778,11 @@ public sealed class SwapRequestsController : ControllerBase
 
         await _db.SaveChangesAsync();
 
-        // Riuso ResolveAcceptance per applicare regole + scambio + audit + notifiche
-        // ATTENZIONE: ResolveAcceptance richiede che chi chiama sia il counterpart.
-        // Dato che abbiamo appena impostato counterpart = chi accetta (cioè uid),
-        // la chiamata è coerente.
-        return await ResolveAcceptance(swap.Id, force);
+        // ResolveAcceptance ha un check di auth (caller deve essere counterpart);
+        // qui invece l'accettante può essere ANCHE l'iniziatore (chi riceve la
+        // controproposta dell'altra parte), quindi disabilitiamo quel check
+        // (l'auth è già stata fatta sopra: solo initiator/counterpart non-proposer).
+        return await ResolveAcceptance(swap.Id, force, skipCallerAuthCheck: true);
     }
 
     [HttpPost("{swapId:guid}/counter/{offerId:guid}/reject")]

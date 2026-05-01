@@ -91,6 +91,7 @@ export type SwapDto = {
   resolutionReason: string | null;
   createdAtUtc: string;
   resolvedAtUtc: string | null;
+  pendingCounterOffersCount: number;
 };
 
 // ---------- Notifications ----------
