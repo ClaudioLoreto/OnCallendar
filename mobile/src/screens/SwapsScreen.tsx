@@ -32,10 +32,12 @@ export default function SwapsScreen({ navigation }: Props) {
 
   // wizard nuova richiesta
   const [newOpen, setNewOpen] = useState(false);
+  const [mode, setMode] = useState<'cessione' | 'scambio'>('cessione');
   const [days, setDays] = useState<DayDto[]>([]);
   const [colleagues, setColleagues] = useState<MedicoDto[]>([]);
   const [pickedShift, setPickedShift] = useState<ShiftDto | null>(null);
   const [pickedColleagues, setPickedColleagues] = useState<Set<string>>(new Set());
+  const [pickedCounterShift, setPickedCounterShift] = useState<ShiftDto | null>(null);
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [stepError, setStepError] = useState<string | null>(null);
@@ -130,7 +132,8 @@ export default function SwapsScreen({ navigation }: Props) {
   // ---- nuova richiesta ----
   const openNew = async () => {
     setNewOpen(true);
-    setPickedShift(null); setPickedColleagues(new Set());
+    setMode('cessione');
+    setPickedShift(null); setPickedColleagues(new Set()); setPickedCounterShift(null);
     setMessage(''); setStepError(null);
     try {
       const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -152,11 +155,31 @@ export default function SwapsScreen({ navigation }: Props) {
     return out;
   }, [days]);
 
+  // I turni del collega scelto (per scambio: 1 collega solo, futuri)
+  const counterShifts = useMemo<ShiftDto[]>(() => {
+    if (mode !== 'scambio' || pickedColleagues.size !== 1) return [];
+    const colleagueId = Array.from(pickedColleagues)[0];
+    const out: ShiftDto[] = [];
+    for (const d of days) for (const s of d.shifts) {
+      if (!s.isPast && s.medicoTurno?.id === colleagueId) out.push(s);
+    }
+    return out;
+  }, [days, mode, pickedColleagues]);
+
   const submitNew = async () => {
     if (!pickedShift || pickedColleagues.size === 0) return;
     setSubmitting(true); setStepError(null);
     try {
-      await SwapsApi.giveawayMulti(pickedShift.id, Array.from(pickedColleagues), message || undefined);
+      if (mode === 'scambio') {
+        if (!pickedCounterShift) {
+          setStepError('Seleziona il turno del collega da prendere in cambio.');
+          setSubmitting(false);
+          return;
+        }
+        await SwapsApi.swap(pickedShift.id, pickedCounterShift.id, message || undefined);
+      } else {
+        await SwapsApi.giveawayMulti(pickedShift.id, Array.from(pickedColleagues), message || undefined);
+      }
       setNewOpen(false);
       await loadLists();
     } catch (e: any) {
@@ -273,11 +296,53 @@ export default function SwapsScreen({ navigation }: Props) {
         <Button title={t('swaps.new')} icon="add" onPress={openNew} />
       </View>
 
-      {/* Sheet wizard nuova richiesta (giveaway) */}
+      {/* Sheet wizard nuova richiesta */}
       <Sheet visible={newOpen} onClose={() => setNewOpen(false)} title={t('swaps.new')}>
         <ScrollView>
+          {/* Tipo richiesta */}
+          <View style={{ flexDirection: 'row', gap: theme.spacing.s, marginBottom: theme.spacing.l }}>
+            <TouchableOpacity
+              onPress={() => { setMode('cessione'); setPickedCounterShift(null); }}
+              style={{
+                flex: 1, padding: theme.spacing.m, borderRadius: theme.radius.m,
+                borderWidth: 2,
+                borderColor: mode === 'cessione' ? theme.colors.primary : theme.colors.border,
+                backgroundColor: mode === 'cessione' ? theme.colors.accent : theme.colors.surface,
+                alignItems: 'center', gap: 6,
+              }}>
+              <Icon name="arrow-forward-circle-outline" size={22} color={mode === 'cessione' ? theme.colors.primary : theme.colors.textSecondary} />
+              <Text style={{ fontWeight: '700', color: mode === 'cessione' ? theme.colors.primary : theme.colors.textPrimary }}>
+                Cessione
+              </Text>
+              <Text style={[theme.typography.caption, { textAlign: 'center' }]}>
+                Cedi un tuo turno (senza contropartita)
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => {
+                setMode('scambio');
+                // Scambio = max 1 collega
+                if (pickedColleagues.size > 1) setPickedColleagues(new Set());
+              }}
+              style={{
+                flex: 1, padding: theme.spacing.m, borderRadius: theme.radius.m,
+                borderWidth: 2,
+                borderColor: mode === 'scambio' ? theme.colors.primary : theme.colors.border,
+                backgroundColor: mode === 'scambio' ? theme.colors.accent : theme.colors.surface,
+                alignItems: 'center', gap: 6,
+              }}>
+              <Icon name="swap-horizontal-outline" size={22} color={mode === 'scambio' ? theme.colors.primary : theme.colors.textSecondary} />
+              <Text style={{ fontWeight: '700', color: mode === 'scambio' ? theme.colors.primary : theme.colors.textPrimary }}>
+                Scambio
+              </Text>
+              <Text style={[theme.typography.caption, { textAlign: 'center' }]}>
+                Cedi un turno e ne prendi uno in cambio
+              </Text>
+            </TouchableOpacity>
+          </View>
+
           <Text style={[theme.typography.body, { fontWeight: '700', marginBottom: theme.spacing.s }]}>
-            <Icon name="calendar-outline" size={16} color={theme.colors.textPrimary} />  1. Quale turno cedi?
+            <Icon name="calendar-outline" size={16} color={theme.colors.textPrimary} />  1. Quale turno {mode === 'scambio' ? 'offri' : 'cedi'}?
           </Text>
           {myShifts.length === 0 ? (
             <View style={{ padding: theme.spacing.m, backgroundColor: theme.colors.surfaceAlt, borderRadius: theme.radius.m, marginBottom: theme.spacing.m }}>
@@ -318,7 +383,8 @@ export default function SwapsScreen({ navigation }: Props) {
           {pickedShift ? (
             <>
               <Text style={[theme.typography.body, { fontWeight: '700', marginBottom: theme.spacing.s }]}>
-                <Icon name="people-outline" size={16} color={theme.colors.textPrimary} />  2. A chi cedi? (seleziona uno o più)
+                <Icon name="people-outline" size={16} color={theme.colors.textPrimary} />
+                {'  '}2. {mode === 'scambio' ? 'Con chi scambi? (uno solo)' : 'A chi cedi? (seleziona uno o più)'}
               </Text>
               {colleagues.map(m => {
                 const active = pickedColleagues.has(m.id);
@@ -327,6 +393,11 @@ export default function SwapsScreen({ navigation }: Props) {
                     key={m.id}
                     onPress={() => {
                       setPickedColleagues(prev => {
+                        if (mode === 'scambio') {
+                          const isSame = prev.has(m.id);
+                          setPickedCounterShift(null);
+                          return isSame ? new Set() : new Set([m.id]);
+                        }
                         const next = new Set(prev);
                         if (next.has(m.id)) next.delete(m.id); else next.add(m.id);
                         return next;
@@ -344,7 +415,7 @@ export default function SwapsScreen({ navigation }: Props) {
                     <Avatar fullName={m.fullName} url={m.avatarUrl} size={32} />
                     <Text style={[theme.typography.body, { flex: 1 }]}>{m.fullName}</Text>
                     <View style={{
-                      width: 22, height: 22, borderRadius: 4,
+                      width: 22, height: 22, borderRadius: mode === 'scambio' ? 11 : 4,
                       borderWidth: 2,
                       borderColor: active ? theme.colors.primary : theme.colors.border,
                       backgroundColor: active ? theme.colors.primary : 'transparent',
@@ -355,10 +426,56 @@ export default function SwapsScreen({ navigation }: Props) {
                   </TouchableOpacity>
                 );
               })}
-              {pickedColleagues.size > 1 ? (
+              {mode === 'cessione' && pickedColleagues.size > 1 ? (
                 <Text style={[theme.typography.caption, { color: theme.colors.textSecondary, marginBottom: theme.spacing.s }]}>
                   Il primo che accetta prende il turno; gli altri riceveranno una cancellazione automatica.
                 </Text>
+              ) : null}
+
+              {/* Selezione contropartita per scambio */}
+              {mode === 'scambio' && pickedColleagues.size === 1 ? (
+                <>
+                  <Text style={[theme.typography.body, { fontWeight: '700', marginBottom: theme.spacing.s, marginTop: theme.spacing.m }]}>
+                    <Icon name="repeat-outline" size={16} color={theme.colors.textPrimary} />  3. Quale suo turno prendi in cambio?
+                  </Text>
+                  {counterShifts.length === 0 ? (
+                    <View style={{ padding: theme.spacing.m, backgroundColor: theme.colors.surfaceAlt, borderRadius: theme.radius.m, marginBottom: theme.spacing.m }}>
+                      <Text style={theme.typography.caption}>
+                        Il collega non ha turni futuri nei prossimi 30 giorni.
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={{ gap: 8, marginBottom: theme.spacing.m }}>
+                      {counterShifts.map(s => {
+                        const active = pickedCounterShift?.id === s.id;
+                        return (
+                          <TouchableOpacity
+                            key={s.id}
+                            onPress={() => setPickedCounterShift(s)}
+                            style={{
+                              flexDirection: 'row', alignItems: 'center', gap: 10,
+                              borderWidth: 1,
+                              borderColor: active ? theme.colors.primary : theme.colors.border,
+                              backgroundColor: active ? theme.colors.accent : theme.colors.surface,
+                              borderRadius: theme.radius.m, paddingHorizontal: 12, paddingVertical: 10,
+                            }}
+                          >
+                            <Icon name={shiftCodeIcon(s.code) as any} size={18} color={theme.colors.primary} />
+                            <Badge label={s.code} tone={shiftCodeTone(s.code) as any} />
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ color: active ? theme.colors.primary : theme.colors.textPrimary, fontWeight: '600', textTransform: 'capitalize' }}>
+                                {formatDayLong(s.date, locale === 'it' ? 'it-IT' : 'en-GB')}
+                              </Text>
+                              <Text style={theme.typography.caption}>
+                                {shiftCodeShort(s.code)} · {s.startLocal} – {s.endLocal}
+                              </Text>
+                            </View>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  )}
+                </>
               ) : null}
 
               <Field label="Messaggio (opzionale)" value={message} onChangeText={setMessage} multiline />
@@ -375,10 +492,17 @@ export default function SwapsScreen({ navigation }: Props) {
             </View>
             <View style={{ flex: 1 }}>
               <Button
-                title={pickedColleagues.size > 1 ? `Invia a ${pickedColleagues.size}` : 'Invia'}
+                title={
+                  mode === 'scambio'
+                    ? 'Proponi scambio'
+                    : pickedColleagues.size > 1 ? `Invia a ${pickedColleagues.size}` : 'Invia'
+                }
                 icon="send"
                 loading={submitting}
-                disabled={!pickedShift || pickedColleagues.size === 0}
+                disabled={
+                  !pickedShift || pickedColleagues.size === 0 ||
+                  (mode === 'scambio' && !pickedCounterShift)
+                }
                 onPress={submitNew}
               />
             </View>

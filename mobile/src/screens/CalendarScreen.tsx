@@ -182,19 +182,16 @@ export default function CalendarScreen({ navigation }: Props) {
         {s.medicoReperibile ? (
           <View style={{
             flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6,
-            backgroundColor: s.isMineReperibile ? theme.colors.warningBg ?? 'rgba(251,191,36,0.12)' : 'transparent',
-            borderRadius: 6, paddingHorizontal: s.isMineReperibile ? 6 : 0,
-            paddingVertical: s.isMineReperibile ? 3 : 0,
           }}>
             <Avatar fullName={s.medicoReperibile.fullName} url={s.medicoReperibile.avatarUrl} size={20} />
             <Text style={[theme.typography.caption, {
               flex: 1,
               fontWeight: s.isMineReperibile ? '700' : '400',
-              color: s.isMineReperibile ? '#d97706' : theme.colors.textSecondary,
+              color: theme.colors.textSecondary,
             }]}>
-              {s.medicoReperibile.fullName}{s.isMineReperibile ? ' (tu – reperibile)' : ''}
+              {s.medicoReperibile.fullName}{s.isMineReperibile ? ' (tu)' : ''}
             </Text>
-            <Badge label="Reperibile" tone="warning" />
+            <Badge label="Reperibile" tone="neutral" />
           </View>
         ) : null}
 
