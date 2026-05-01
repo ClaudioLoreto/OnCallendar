@@ -270,13 +270,6 @@ export default function CalendarScreen({ navigation }: Props) {
 
             <View style={{ gap: theme.spacing.s }}>
               <Button
-                title={actionShift.status === ShiftStatus.OnBoard ? 'Ritira dalla bacheca' : 'Pubblica in bacheca'}
-                icon={actionShift.status === ShiftStatus.OnBoard ? 'arrow-undo-outline' : 'megaphone-outline'}
-                variant={actionShift.status === ShiftStatus.OnBoard ? 'subtle' : 'secondary'}
-                loading={actionBusy}
-                onPress={togglePublish}
-              />
-              <Button
                 title="Cedi a un collega"
                 icon="person-add-outline"
                 onPress={startGiveaway}
