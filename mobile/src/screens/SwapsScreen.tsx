@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  FlatList, RefreshControl, SafeAreaView, ScrollView, Text, TouchableOpacity, View,
+  Alert, FlatList, RefreshControl, SafeAreaView, ScrollView, Text, TouchableOpacity, View,
 } from 'react-native';
 import {
   Avatar, Badge, Button, Card, EmptyState, Field, Icon, SegmentedControl, Sheet,
@@ -65,7 +65,7 @@ export default function SwapsScreen({ navigation }: Props) {
   const decide = async (id: string, action: 'accept' | 'reject' | 'cancel') => {
     setBusy(id); setError(null);
     try {
-      if (action === 'accept') await SwapsApi.accept(id);
+      if (action === 'accept') await acceptWithWarningGuard(id, false);
       else if (action === 'reject') await SwapsApi.reject(id);
       else await SwapsApi.cancel(id);
       await loadLists();
@@ -73,6 +73,57 @@ export default function SwapsScreen({ navigation }: Props) {
       setError(e?.response?.data?.error ?? e?.message ?? 'Errore');
     } finally {
       setBusy(null);
+    }
+  };
+
+  /**
+   * Tenta l'accept. Se il backend torna 422 con canForce=true, mostra DUE
+   * conferme in cascata all'utente (la 12h è una soglia di tutela, non un
+   * divieto: la reperibilità è standby, non lavoro effettivo). Se l'utente
+   * conferma entrambe, ripete con force=true.
+   */
+  const acceptWithWarningGuard = async (id: string, force: boolean): Promise<void> => {
+    try {
+      await SwapsApi.accept(id, force);
+    } catch (e: any) {
+      const data = e?.response?.data;
+      if (e?.response?.status === 422 && data?.canForce === true && !force) {
+        const violations: Array<{ message: string }> = data.violations ?? [];
+        const list = violations.map(v => `• ${v.message}`).join('\n');
+        await new Promise<void>((resolve, reject) => {
+          Alert.alert(
+            '⚠️ Soglia di tutela superata',
+            `${list}\n\nLa reperibilità è standby (urgenze), non lavoro continuativo: ` +
+            `valuta se puoi prenderti questa responsabilità.`,
+            [
+              { text: 'Annulla', style: 'cancel', onPress: () => reject(new Error('annullato')) },
+              {
+                text: 'Prosegui',
+                style: 'destructive',
+                onPress: () => {
+                  Alert.alert(
+                    'Conferma definitiva',
+                    'Confermi di voler accettare anche se superi la soglia consigliata?',
+                    [
+                      { text: 'No, annulla', style: 'cancel', onPress: () => reject(new Error('annullato')) },
+                      {
+                        text: 'Sì, accetto',
+                        style: 'destructive',
+                        onPress: async () => {
+                          try { await SwapsApi.accept(id, true); resolve(); }
+                          catch (e2) { reject(e2); }
+                        },
+                      },
+                    ],
+                  );
+                },
+              },
+            ],
+          );
+        });
+      } else {
+        throw e;
+      }
     }
   };
 

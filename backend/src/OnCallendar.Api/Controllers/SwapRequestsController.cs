@@ -219,12 +219,23 @@ public sealed class SwapRequestsController : ControllerBase
         _db.SwapRequests.Add(swap);
         await _db.SaveChangesAsync();
 
-        return await ResolveAcceptance(swap.Id);
+        // Pick-from-board è un'azione del medico stesso: può forzare i Warning
+        // implicitamente (qui passiamo force=true). I Block restano comunque tali.
+        return await ResolveAcceptance(swap.Id, force: true);
     }
 
     // ---------- ACCEPT / REJECT / CANCEL ----------
+
+    /// <summary>
+    /// Accetta una richiesta. Se il rule engine torna SOLO Warning (es. catena di
+    /// lavoro &gt; 12h, riposo &lt; 11h), il client può ripetere la chiamata con
+    /// <c>?force=true</c> dopo aver confermato esplicitamente all'utente che si
+    /// sta prendendo la responsabilità (la reperibilità è standby, non
+    /// lavoro continuativo).
+    /// </summary>
     [HttpPost("{id:guid}/accept")]
-    public Task<ActionResult<SwapDto>> Accept(Guid id) => ResolveAcceptance(id);
+    public Task<ActionResult<SwapDto>> Accept(Guid id, [FromQuery] bool force = false)
+        => ResolveAcceptance(id, force);
 
     public sealed record RejectBody(string? Reason);
 
@@ -288,7 +299,7 @@ public sealed class SwapRequestsController : ControllerBase
     }
 
     // ---------- CORE ----------
-    private async Task<ActionResult<SwapDto>> ResolveAcceptance(Guid swapId)
+    private async Task<ActionResult<SwapDto>> ResolveAcceptance(Guid swapId, bool force = false)
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
         var swap = await LoadSwaps().FirstOrDefaultAsync(r => r.Id == swapId);
@@ -337,19 +348,41 @@ public sealed class SwapRequestsController : ControllerBase
 
         if (!result.IsValid)
         {
-            swap.Status = SwapRequestStatus.BlockedByRules;
-            swap.ResolvedAtUtc = DateTime.UtcNow;
-            swap.ResolutionReason = string.Join(" | ",
-                result.Violations.Select(v => $"[{v.Code}] {v.Message}"));
-            _audit.Log("SwapRequest", swap.Id, "BlockedByRules", swap.TenantId,
-                notes: swap.ResolutionReason);
-            await _db.SaveChangesAsync();
-
-            return UnprocessableEntity(new
+            // Block invalicabile (overlap, stesso medico, turno passato…)
+            if (result.HasBlockingViolations)
             {
-                error = "Scambio bloccato dal Rule Engine.",
-                violations = result.Violations
-            });
+                swap.Status = SwapRequestStatus.BlockedByRules;
+                swap.ResolvedAtUtc = DateTime.UtcNow;
+                swap.ResolutionReason = string.Join(" | ",
+                    result.Violations.Select(v => $"[{v.Code}] {v.Message}"));
+                _audit.Log("SwapRequest", swap.Id, "BlockedByRules", swap.TenantId,
+                    notes: swap.ResolutionReason);
+                await _db.SaveChangesAsync();
+
+                return UnprocessableEntity(new
+                {
+                    error = "Scambio bloccato dal Rule Engine.",
+                    canForce = false,
+                    violations = result.Violations
+                });
+            }
+
+            // Solo Warning: forzabile dall'utente con conferma esplicita.
+            if (!force)
+            {
+                // NON cambio lo stato: la swap resta Pending, il client mostra
+                // un alert e ripete la chiamata con ?force=true se l'utente conferma.
+                return UnprocessableEntity(new
+                {
+                    error = "Conferma necessaria: superi una soglia di tutela.",
+                    canForce = true,
+                    violations = result.Violations
+                });
+            }
+
+            // force=true: registro che è stato forzato e procedo.
+            _audit.Log("SwapRequest", swap.Id, "AcceptedWithWarnings", swap.TenantId,
+                notes: string.Join(" | ", result.Violations.Select(v => $"[{v.Code}] {v.Message}")));
         }
 
         await using var tx = await _db.Database.BeginTransactionAsync();

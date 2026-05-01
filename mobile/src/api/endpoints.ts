@@ -177,7 +177,8 @@ export const SwapsApi = {
     apiClient.post<SwapDto>('/api/swaps/swap', { myShiftId, otherShiftId, message }).then(r => r.data),
   pick: (shiftId: string) =>
     apiClient.post<SwapDto>(`/api/swaps/pick/${shiftId}`).then(r => r.data),
-  accept: (id: string) => apiClient.post<SwapDto>(`/api/swaps/${id}/accept`).then(r => r.data),
+  accept: (id: string, force = false) =>
+    apiClient.post<SwapDto>(`/api/swaps/${id}/accept${force ? '?force=true' : ''}`).then(r => r.data),
   reject: (id: string, reason?: string) =>
     apiClient.post<SwapDto>(`/api/swaps/${id}/reject`, { reason }).then(r => r.data),
   cancel: (id: string) => apiClient.post<SwapDto>(`/api/swaps/${id}/cancel`).then(r => r.data),

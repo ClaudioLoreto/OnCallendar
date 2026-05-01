@@ -24,11 +24,13 @@ public sealed class ShiftValidationService : IShiftValidationService
 
         if (shift.EndUtc <= shift.StartUtc)
             violations.Add(new(ShiftRuleCode.InvalidShiftWindow,
-                "Il turno ha intervallo non valido (End <= Start).", null, shift.Id));
+                "Il turno ha intervallo non valido (End <= Start).", null, shift.Id,
+                ShiftRuleSeverity.Block));
 
         if (fromMedicoId.HasValue && fromMedicoId.Value == toMedicoId)
             violations.Add(new(ShiftRuleCode.SameMedico,
-                "Il medico cedente e il ricevente coincidono.", toMedicoId, shift.Id));
+                "Il medico cedente e il ricevente coincidono.", toMedicoId, shift.Id,
+                ShiftRuleSeverity.Block));
 
         // Simulo l'assegnazione: aggiungo lo shift alla lista del destinatario
         var simulated = targetMedicoExistingShifts
@@ -57,7 +59,8 @@ public sealed class ShiftValidationService : IShiftValidationService
 
         if (medicoAId == medicoBId)
             violations.Add(new(ShiftRuleCode.SameMedico,
-                "Medico A e Medico B coincidono: scambio non valido."));
+                "Medico A e Medico B coincidono: scambio non valido.",
+                Severity: ShiftRuleSeverity.Block));
 
         // Post-swap: A perde shiftA e prende shiftB ; B perde shiftB e prende shiftA
         var aAfter = medicoAOtherShifts
@@ -93,14 +96,15 @@ public sealed class ShiftValidationService : IShiftValidationService
         if (ordered.Count == 0)
             yield break;
 
-        // 1) Singolo turno > 12h è già violazione di "12h consecutive"
+        // 1) Singolo turno > 12h: Warning forzabile (la 12h è una soglia di tutela,
+        //    non un divieto: l'utente può prendersi la responsabilità di farlo).
         foreach (var s in ordered)
         {
             if (s.EndUtc - s.StartUtc > MaxConsecutiveWork)
                 yield return new(
                     ShiftRuleCode.MaxConsecutiveHoursExceeded,
-                    $"Il turno dura {(s.EndUtc - s.StartUtc).TotalHours:F1}h, supera il limite di {MaxConsecutiveWork.TotalHours}h consecutive.",
-                    medicoId, s.Id);
+                    $"Il turno dura {(s.EndUtc - s.StartUtc).TotalHours:F1}h, supera la soglia di tutela di {MaxConsecutiveWork.TotalHours}h consecutive.",
+                    medicoId, s.Id, ShiftRuleSeverity.Warning);
         }
 
         // 2) Sliding window per overlap, rest e catena consecutiva
@@ -112,13 +116,13 @@ public sealed class ShiftValidationService : IShiftValidationService
             var prev = ordered[i - 1];
             var curr = ordered[i];
 
-            // Overlap
+            // Overlap: BLOCK invalicabile (non puoi essere in due posti).
             if (curr.StartUtc < prev.EndUtc)
             {
                 yield return new(
                     ShiftRuleCode.OverlappingShifts,
                     $"Sovrapposizione tra turni {prev.Id} e {curr.Id}.",
-                    medicoId, curr.Id);
+                    medicoId, curr.Id, ShiftRuleSeverity.Block);
                 // estendo comunque la catena per non perdere altri controlli
                 chainEnd = curr.EndUtc > chainEnd ? curr.EndUtc : chainEnd;
                 continue;
@@ -128,26 +132,26 @@ public sealed class ShiftValidationService : IShiftValidationService
 
             if (gap < MinRestPeriod)
             {
-                // Stacco insufficiente: i due turni vanno considerati come un'unica catena
+                // Stacco insufficiente: Warning forzabile (la reperibilità è standby,
+                // non lavoro effettivo, quindi il medico può valutare se prendersela).
                 if (gap > TimeSpan.Zero)
                 {
                     yield return new(
                         ShiftRuleCode.MinRestPeriodViolated,
-                        $"Riposo di {gap.TotalHours:F1}h tra i turni: minimo richiesto {MinRestPeriod.TotalHours}h.",
-                        medicoId, curr.Id);
+                        $"Riposo di {gap.TotalHours:F1}h tra i turni: soglia minima consigliata {MinRestPeriod.TotalHours}h.",
+                        medicoId, curr.Id, ShiftRuleSeverity.Warning);
                 }
 
                 chainEnd = curr.EndUtc;
 
-                // Catena di lavoro effettivo > 12h?
-                // (sommo le durate dei turni della catena, non includo il gap)
+                // Catena di lavoro > 12h: Warning forzabile.
                 var chainWork = SumWorkInChain(ordered, chainStart, chainEnd);
                 if (chainWork > MaxConsecutiveWork)
                 {
                     yield return new(
                         ShiftRuleCode.MaxConsecutiveHoursExceeded,
-                        $"Catena di {chainWork.TotalHours:F1}h di lavoro senza riposo adeguato (limite {MaxConsecutiveWork.TotalHours}h).",
-                        medicoId, curr.Id);
+                        $"Catena di {chainWork.TotalHours:F1}h di lavoro senza riposo adeguato (soglia consigliata {MaxConsecutiveWork.TotalHours}h).",
+                        medicoId, curr.Id, ShiftRuleSeverity.Warning);
                 }
             }
             else
