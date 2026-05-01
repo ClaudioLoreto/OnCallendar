@@ -23,12 +23,14 @@ public sealed class SwapRequestsController : ControllerBase
     private readonly ICurrentUserService _user;
     private readonly IShiftValidationService _rules;
     private readonly IAuditLogger _audit;
+    private readonly IEmailSender _mail;
 
     public SwapRequestsController(
         ApplicationDbContext db, ICurrentUserService user,
-        IShiftValidationService rules, IAuditLogger audit)
+        IShiftValidationService rules, IAuditLogger audit,
+        IEmailSender mail)
     {
-        _db = db; _user = user; _rules = rules; _audit = audit;
+        _db = db; _user = user; _rules = rules; _audit = audit; _mail = mail;
     }
 
     public sealed record ShiftBriefDto(
@@ -137,6 +139,19 @@ public sealed class SwapRequestsController : ControllerBase
             newValues: new { swap.InitiatorMedicoId, swap.CounterpartMedicoId, swap.InitiatorShiftId });
 
         await _db.SaveChangesAsync();
+
+        // Notifica al destinatario
+        var initiator = await _db.Users.FirstOrDefaultAsync(u => u.Id == uid);
+        await SendSwapMailAsync(
+            to: to,
+            initiator: initiator,
+            subject: $"[OnCallendar] Nuova richiesta turno da {FullName(initiator)}",
+            body: $"<p>Ciao {to.FirstName},</p>" +
+                  $"<p><b>{FullName(initiator)}</b> ti ha proposto di prendere il suo turno " +
+                  $"<b>{shift.Code}</b> del <b>{shift.Date:dd/MM/yyyy}</b>.</p>" +
+                  (string.IsNullOrWhiteSpace(req.Message) ? string.Empty : $"<p><i>Messaggio:</i> {System.Net.WebUtility.HtmlEncode(req.Message)}</p>") +
+                  "<p>Apri l'app OnCallendar per accettare o rifiutare.</p>");
+
         return Ok(await ReloadDto(swap.Id));
     }
 
@@ -228,6 +243,17 @@ public sealed class SwapRequestsController : ControllerBase
         swap.ResolutionReason = body?.Reason;
         _audit.Log("SwapRequest", swap.Id, "Rejected", swap.TenantId, notes: body?.Reason);
         await _db.SaveChangesAsync();
+
+        // Notifica all'iniziatore
+        await SendSwapMailAsync(
+            to: swap.InitiatorMedico,
+            initiator: swap.CounterpartMedico,
+            subject: $"[OnCallendar] Richiesta rifiutata da {FullName(swap.CounterpartMedico)}",
+            body: $"<p>Ciao {swap.InitiatorMedico.FirstName},</p>" +
+                  $"<p><b>{FullName(swap.CounterpartMedico)}</b> ha rifiutato la tua richiesta sul turno " +
+                  $"<b>{swap.InitiatorShift.Code}</b> del <b>{swap.InitiatorShift.Date:dd/MM/yyyy}</b>.</p>" +
+                  (string.IsNullOrWhiteSpace(body?.Reason) ? string.Empty : $"<p><i>Motivo:</i> {System.Net.WebUtility.HtmlEncode(body!.Reason!)}</p>"));
+
         return Ok(Map(swap));
     }
 
@@ -245,6 +271,19 @@ public sealed class SwapRequestsController : ControllerBase
         swap.ResolvedAtUtc = DateTime.UtcNow;
         _audit.Log("SwapRequest", swap.Id, "Cancelled", swap.TenantId);
         await _db.SaveChangesAsync();
+
+        // Notifica al counterpart (se c'era un destinatario)
+        if (swap.CounterpartMedico is not null)
+        {
+            await SendSwapMailAsync(
+                to: swap.CounterpartMedico,
+                initiator: swap.InitiatorMedico,
+                subject: $"[OnCallendar] Richiesta annullata da {FullName(swap.InitiatorMedico)}",
+                body: $"<p>Ciao {swap.CounterpartMedico.FirstName},</p>" +
+                      $"<p><b>{FullName(swap.InitiatorMedico)}</b> ha annullato la richiesta sul turno " +
+                      $"<b>{swap.InitiatorShift.Code}</b> del <b>{swap.InitiatorShift.Date:dd/MM/yyyy}</b>.</p>");
+        }
+
         return Ok(Map(swap));
     }
 
@@ -343,7 +382,46 @@ public sealed class SwapRequestsController : ControllerBase
         await _db.SaveChangesAsync();
         await tx.CommitAsync();
 
+        // Notifica all'iniziatore: la sua richiesta è stata accettata.
+        await SendSwapMailAsync(
+            to: swap.InitiatorMedico,
+            initiator: swap.CounterpartMedico,
+            subject: $"[OnCallendar] Richiesta accettata da {FullName(swap.CounterpartMedico)}",
+            body: $"<p>Ciao {swap.InitiatorMedico.FirstName},</p>" +
+                  $"<p><b>{FullName(swap.CounterpartMedico)}</b> ha accettato la tua richiesta sul turno " +
+                  $"<b>{swap.InitiatorShift.Code}</b> del <b>{swap.InitiatorShift.Date:dd/MM/yyyy}</b>.</p>" +
+                  (swap.CounterpartShift is null
+                      ? string.Empty
+                      : $"<p>In cambio prenderai il suo turno <b>{swap.CounterpartShift.Code}</b> del <b>{swap.CounterpartShift.Date:dd/MM/yyyy}</b>.</p>"));
+
         return Ok(await ReloadDto(swap.Id));
+    }
+
+    // ---------- MAIL HELPERS ----------
+    private static string FullName(ApplicationUser? u) =>
+        u is null ? "qualcuno" : $"{u.FirstName} {u.LastName}".Trim();
+
+    private async Task SendSwapMailAsync(
+        ApplicationUser? to,
+        ApplicationUser? initiator,
+        string subject,
+        string body)
+    {
+        if (to is null || string.IsNullOrWhiteSpace(to.Email)) return;
+        try
+        {
+            await _mail.SendAsync(
+                toEmail: to.Email!,
+                toName: FullName(to),
+                subject: subject,
+                htmlBody: body,
+                replyToEmail: initiator?.Email,
+                replyToName: initiator is null ? null : FullName(initiator));
+        }
+        catch
+        {
+            // Mai bloccare la response per la mail.
+        }
     }
 
     private async Task<SwapDto> ReloadDto(Guid id)

@@ -10,6 +10,7 @@ using OnCallendar.Application.Common.Interfaces;
 using OnCallendar.Application.Common.Services;
 using OnCallendar.Domain.Entities;
 using OnCallendar.Domain.Services;
+using OnCallendar.Infrastructure.Mail;
 using OnCallendar.Infrastructure.Persistence;
 using OnCallendar.Infrastructure.Persistence.Seed;
 
@@ -92,6 +93,10 @@ builder.Services.AddAuthorization();
 
 // Domain services
 builder.Services.AddScoped<IShiftValidationService, ShiftValidationService>();
+
+// Mail (SMTP via MailKit). Sezione "Mail" in appsettings.
+builder.Services.Configure<MailSettings>(builder.Configuration.GetSection("Mail"));
+builder.Services.AddScoped<IEmailSender, MailKitEmailSender>();
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

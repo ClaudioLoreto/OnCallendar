@@ -25,6 +25,12 @@ public class ApplicationUser : IdentityUser<Guid>, ISoftDeletable
     /// </summary>
     public int? MedicoNumber { get; set; }
 
+    /// <summary>
+    /// Codice badge breve (es. "M01", "M02"…) usato come alternativa
+    /// all'email per il login rapido. Univoco a livello globale.
+    /// </summary>
+    public string? Badge { get; set; }
+
     public string? FiscalCode { get; set; }
     public string? MedicalRegistrationNumber { get; set; }
 

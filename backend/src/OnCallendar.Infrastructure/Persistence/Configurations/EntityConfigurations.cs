@@ -32,6 +32,7 @@ public class ApplicationUserConfiguration : IEntityTypeConfiguration<Application
         b.Property(x => x.Phone).HasMaxLength(40);
         b.Property(x => x.PreferredLanguage).HasMaxLength(8).HasDefaultValue("it");
         b.Property(x => x.ThemePreference).HasMaxLength(16).HasDefaultValue("system");
+        b.Property(x => x.Badge).HasMaxLength(16);
 
         b.HasOne(x => x.Tenant)
             .WithMany(t => t.Users)
@@ -39,6 +40,7 @@ public class ApplicationUserConfiguration : IEntityTypeConfiguration<Application
             .OnDelete(DeleteBehavior.Restrict);
 
         b.HasIndex(x => new { x.TenantId, x.MedicoNumber });
+        b.HasIndex(x => x.Badge).IsUnique().HasFilter("[Badge] IS NOT NULL");
     }
 }
 

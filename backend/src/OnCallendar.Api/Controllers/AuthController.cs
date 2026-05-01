@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using OnCallendar.Api.Auth;
 using OnCallendar.Domain.Entities;
 using OnCallendar.Domain.Enums;
@@ -42,12 +43,30 @@ public sealed class AuthController : ControllerBase
 
     /// <summary>
     /// Login pubblico (medici e SuperAdmin).
+    /// Il campo "Email" accetta indifferentemente l'email completa o il
+    /// codice badge (es. "M01").
     /// </summary>
     [HttpPost("login")]
     [AllowAnonymous]
     public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest req)
     {
-        var user = await _users.FindByEmailAsync(req.Email);
+        var identifier = (req.Email ?? string.Empty).Trim();
+        if (identifier.Length == 0)
+            return Unauthorized(new { error = "Credenziali non valide." });
+
+        ApplicationUser? user = null;
+
+        if (identifier.Contains('@'))
+        {
+            user = await _users.FindByEmailAsync(identifier);
+        }
+        else
+        {
+            // Badge case-insensitive
+            var badge = identifier.ToUpperInvariant();
+            user = await _db.Users.FirstOrDefaultAsync(u => u.Badge == badge);
+        }
+
         if (user is null || !user.IsActive)
             return Unauthorized(new { error = "Credenziali non valide." });
 

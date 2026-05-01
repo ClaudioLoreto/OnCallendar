@@ -25,13 +25,13 @@ public static class DbSeeder
 
     public const string NavelliTenantSlug = "navelli";
 
-    /// <summary>4 medici del calendario storico di Navelli.</summary>
-    public static readonly (int Number, string Email, string Password, string First, string Last)[] Medici =
+    /// <summary>4 medici del calendario storico di Navelli. Badge = login rapido.</summary>
+    public static readonly (int Number, string Badge, string Email, string Password, string First, string Last)[] Medici =
     {
-        (1, "superboy23+claudia@gmail.com",    "Medico#2026!", "Claudia",    "Ioannucci"),
-        (2, "superboy23+edoardo@gmail.com",    "Medico#2026!", "Edoardo",    "Luci"),
-        (3, "superboy23+emanuele@gmail.com",   "Medico#2026!", "Emanuele",   "Dimarteu"),
-        (4, "superboy23+alessandro@gmail.com", "Medico#2026!", "Alessandro", "Medico4"),
+        (1, "M01", "superboy23+claudia@gmail.com",    "Medico#2026!", "Claudia",    "Ioannucci"),
+        (2, "M02", "superboy23+edoardo@gmail.com",    "Medico#2026!", "Edoardo",    "Luci"),
+        (3, "M03", "superboy23+emanuele@gmail.com",   "Medico#2026!", "Emanuele",   "Dimarteu"),
+        (4, "M04", "superboy23+alessandro@gmail.com", "Medico#2026!", "Alessandro", "Medico4"),
     };
 
     public static async Task SeedAsync(
@@ -97,7 +97,7 @@ public static class DbSeeder
         }
 
         // 4 Medici di Navelli
-        foreach (var (number, email, password, first, last) in Medici)
+        foreach (var (number, badge, email, password, first, last) in Medici)
         {
             var user = await userManager.FindByEmailAsync(email);
             if (user is null)
@@ -112,6 +112,7 @@ public static class DbSeeder
                     Role = UserRole.Medico,
                     TenantId = tenant.Id,
                     MedicoNumber = number,
+                    Badge = badge,
                     IsActive = true,
                     CreatedAtUtc = DateTime.UtcNow,
                 };
@@ -122,10 +123,12 @@ public static class DbSeeder
                         string.Join("; ", res.Errors.Select(e => e.Description)));
                 await userManager.AddToRoleAsync(user, MedicoRole);
             }
-            else if (user.MedicoNumber != number)
+            else
             {
-                user.MedicoNumber = number;
-                await userManager.UpdateAsync(user);
+                var changed = false;
+                if (user.MedicoNumber != number) { user.MedicoNumber = number; changed = true; }
+                if (user.Badge != badge)         { user.Badge = badge;         changed = true; }
+                if (changed) await userManager.UpdateAsync(user);
             }
         }
 

@@ -64,11 +64,13 @@ const LoginScreen: React.FC = () => {
         <Card>
           <Field
             label={t('login.email')}
+            placeholder={t('login.emailPlaceholder')}
             value={email}
             onChangeText={setEmail}
             autoCapitalize="none"
-            keyboardType="email-address"
-            autoComplete="email"
+            autoCorrect={false}
+            keyboardType="default"
+            autoComplete="username"
           />
           <Field
             label={t('login.password')}
