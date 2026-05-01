@@ -21,7 +21,11 @@ const typeConfig = (type: string): { icon: string; color: string; label: string 
 };
 
 const timeAgo = (iso: string): string => {
-  const diff = Date.now() - new Date(iso).getTime();
+  // If the backend returned the timestamp without an explicit timezone marker
+  // (legacy responses), JS would parse it as local time and add a timezone
+  // offset. Force UTC interpretation by appending Z when missing.
+  const normalised = /[Z+\-]\d{2}:?\d{2}$|Z$/.test(iso) ? iso : iso + 'Z';
+  const diff = Date.now() - new Date(normalised).getTime();
   const mins = Math.floor(diff / 60_000);
   if (mins < 1) return 'Ora';
   if (mins < 60) return `${mins} min fa`;

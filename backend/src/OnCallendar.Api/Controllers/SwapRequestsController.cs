@@ -289,6 +289,97 @@ public sealed class SwapRequestsController : ControllerBase
         return Ok(await ReloadDto(swap.Id));
     }
 
+    // ---------- MULTI-DESTINATARIO SWAP ----------
+    public sealed record CreateMultiSwapRequest(Guid MyShiftId, List<Guid> CandidateShiftIds, string? Message);
+
+    /// <summary>
+    /// Propone uno scambio del proprio turno verso più candidati contemporaneamente:
+    /// per ogni turno candidato dei colleghi viene creata una SwapRequest separata;
+    /// il primo che accetta vince e tutte le altre richieste pendenti per il proprio
+    /// turno vengono auto-cancellate (gestito in ResolveAcceptance via cleanup).
+    /// </summary>
+    [HttpPost("swap-multi")]
+    public async Task<ActionResult<IEnumerable<SwapDto>>> CreateMultiSwap([FromBody] CreateMultiSwapRequest req)
+    {
+        if (_user.UserId is not Guid uid) return Unauthorized();
+        if (req.CandidateShiftIds is null || req.CandidateShiftIds.Count == 0)
+            return BadRequest(new { error = "Seleziona almeno un turno candidato." });
+
+        var mine = await _db.Shifts.FirstOrDefaultAsync(s => s.Id == req.MyShiftId);
+        if (mine is null) return NotFound(new { error = "Turno non trovato." });
+        if (mine.MedicoTurnoId != uid) return Forbid();
+        if (mine.StartUtc <= DateTime.UtcNow)
+            return BadRequest(new { error = "Turno già iniziato o passato." });
+
+        var candidateIds = req.CandidateShiftIds.Distinct().ToList();
+        var candidates = await _db.Shifts
+            .Where(s => candidateIds.Contains(s.Id) && s.MedicoTurnoId != null && s.MedicoTurnoId != uid)
+            .ToListAsync();
+        if (candidates.Count == 0)
+            return BadRequest(new { error = "Nessun turno candidato valido." });
+
+        // Annulla precedenti richieste pendenti che coinvolgono il mio turno
+        var existing = await _db.SwapRequests
+            .Where(r => (r.InitiatorShiftId == mine.Id || r.CounterpartShiftId == mine.Id)
+                        && r.Status == SwapRequestStatus.Pending)
+            .ToListAsync();
+        foreach (var ex in existing)
+        {
+            ex.Status = SwapRequestStatus.Cancelled;
+            ex.ResolvedAtUtc = DateTime.UtcNow;
+            ex.ResolutionReason = "Rimpiazzato da nuova richiesta multi-scambio";
+        }
+
+        var initiator = await _db.Users.FirstOrDefaultAsync(u => u.Id == uid);
+        var created = new List<SwapRequest>();
+        var notifiedRecipients = new List<(SwapRequest Swap, Domain.Entities.ApplicationUser To, Shift Cand)>();
+
+        foreach (var cand in candidates)
+        {
+            var swap = new SwapRequest
+            {
+                TenantId = mine.TenantId,
+                Type = SwapRequestType.Swap,
+                Status = SwapRequestStatus.Pending,
+                InitiatorMedicoId = uid,
+                InitiatorShiftId = mine.Id,
+                CounterpartMedicoId = cand.MedicoTurnoId!.Value,
+                CounterpartShiftId = cand.Id,
+                Message = req.Message,
+                CreatedAtUtc = DateTime.UtcNow,
+            };
+            _db.SwapRequests.Add(swap);
+            var to = await _db.Users.FirstOrDefaultAsync(u => u.Id == cand.MedicoTurnoId!.Value);
+            if (to != null)
+            {
+                _db.Notifications.Add(MakeNotif(mine.TenantId, to.Id, "SwapIncoming",
+                    $"{FullName(initiator)} ti ha proposto uno scambio per il {mine.Date:dd/MM/yyyy}", swap.Id));
+                notifiedRecipients.Add((swap, to, cand));
+            }
+            created.Add(swap);
+        }
+
+        _audit.Log("SwapRequest", Guid.NewGuid(), "MultiSwapCreated", mine.TenantId,
+            newValues: new { MyShiftId = mine.Id, CandidateCount = created.Count });
+        await _db.SaveChangesAsync();
+
+        foreach (var (_, to, cand) in notifiedRecipients)
+        {
+            await SendSwapMailAsync(to, initiator,
+                $"[OnCallendar] Proposta di scambio da {FullName(initiator)}",
+                $"<p>Ciao {to.FirstName},</p>" +
+                $"<p><b>{FullName(initiator)}</b> ti propone di scambiare il suo <b>{mine.Code}</b> del " +
+                $"<b>{mine.Date:dd/MM/yyyy}</b> con il tuo <b>{cand.Code}</b> del <b>{cand.Date:dd/MM/yyyy}</b>.</p>" +
+                (string.IsNullOrWhiteSpace(req.Message) ? string.Empty
+                    : $"<p><i>Messaggio:</i> {WebUtility.HtmlEncode(req.Message)}</p>") +
+                "<p>Apri l'app OnCallendar per accettare o rifiutare.</p>");
+        }
+
+        var ids = created.Select(s => s.Id).ToList();
+        var fresh = await LoadSwaps().Where(r => ids.Contains(r.Id)).ToListAsync();
+        return Ok(fresh.Select(Map));
+    }
+
     [HttpPost("pick/{shiftId:guid}")]
     public async Task<ActionResult<SwapDto>> PickFromBoard(Guid shiftId)
     {

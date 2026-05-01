@@ -1,4 +1,6 @@
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -6,6 +8,7 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using OnCallendar.Api.Auth;
 using OnCallendar.Api.Services;
+using OnCallendar.Api;
 using OnCallendar.Application.Common.Interfaces;
 using OnCallendar.Application.Common.Services;
 using OnCallendar.Domain.Entities;
@@ -98,7 +101,15 @@ builder.Services.AddScoped<IShiftValidationService, ShiftValidationService>();
 builder.Services.Configure<MailSettings>(builder.Configuration.GetSection("Mail"));
 builder.Services.AddScoped<IEmailSender, MailKitEmailSender>();
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(opt =>
+    {
+        // Force all DateTime values to be serialized as UTC ISO 8601 with Z suffix.
+        // Without this, EF Core returns DateTime with Kind=Unspecified and JS parses
+        // them as local time, causing a timezone offset (e.g. "2 ore fa" sfalsato).
+        opt.JsonSerializerOptions.Converters.Add(new UtcDateTimeConverter());
+        opt.JsonSerializerOptions.Converters.Add(new UtcNullableDateTimeConverter());
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {

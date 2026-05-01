@@ -201,6 +201,9 @@ export const SwapsApi = {
     apiClient.post<SwapDto[]>('/api/swaps/giveaway-multi', { shiftId, recipientIds, message }).then(r => r.data),
   swap: (myShiftId: string, otherShiftId: string, message?: string) =>
     apiClient.post<SwapDto>('/api/swaps/swap', { myShiftId, otherShiftId, message }).then(r => r.data),
+  /** Scambio multi-candidato: per ogni turno candidato dei colleghi viene creata una richiesta. */
+  swapMulti: (myShiftId: string, candidateShiftIds: string[], message?: string) =>
+    apiClient.post<SwapDto[]>('/api/swaps/swap-multi', { myShiftId, candidateShiftIds, message }).then(r => r.data),
   pick: (shiftId: string) =>
     apiClient.post<SwapDto>(`/api/swaps/pick/${shiftId}`).then(r => r.data),
   accept: (id: string, force = false) =>

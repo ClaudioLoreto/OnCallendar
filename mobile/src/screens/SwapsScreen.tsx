@@ -38,10 +38,15 @@ export default function SwapsScreen({ navigation }: Props) {
   const [colleagues, setColleagues] = useState<MedicoDto[]>([]);
   const [pickedShift, setPickedShift] = useState<ShiftDto | null>(null);
   const [pickedColleagues, setPickedColleagues] = useState<Set<string>>(new Set());
-  const [pickedCounterShift, setPickedCounterShift] = useState<ShiftDto | null>(null);
+  const [pickedCounterShiftIds, setPickedCounterShiftIds] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [stepError, setStepError] = useState<string | null>(null);
+
+  // Modal custom: avviso soglia di tutela (riposo/lavoro continuativo)
+  const [warnOpen, setWarnOpen] = useState(false);
+  const [warnViolations, setWarnViolations] = useState<Array<{ message: string; ruleCode?: string }>>([]);
+  const [warnConfirmFn, setWarnConfirmFn] = useState<(() => Promise<void>) | null>(null);
 
   // ----- Trattative -----
   const [counterSwap, setCounterSwap] = useState<SwapDto | null>(null);
@@ -100,38 +105,16 @@ export default function SwapsScreen({ navigation }: Props) {
     } catch (e: any) {
       const data = e?.response?.data;
       if (e?.response?.status === 422 && data?.canForce === true && !force) {
-        const violations: Array<{ message: string }> = data.violations ?? [];
-        const list = violations.map(v => `• ${v.message}`).join('\n');
+        const violations: Array<{ message: string; ruleCode?: string }> = data.violations ?? [];
         await new Promise<void>((resolve, reject) => {
-          Alert.alert(
-            '⚠️ Soglia di tutela superata',
-            `${list}\n\nLa reperibilità è standby (urgenze), non lavoro continuativo: ` +
-            `valuta se puoi prenderti questa responsabilità.`,
-            [
-              { text: 'Annulla', style: 'cancel', onPress: () => reject(new Error('annullato')) },
-              {
-                text: 'Prosegui',
-                style: 'destructive',
-                onPress: () => {
-                  Alert.alert(
-                    'Conferma definitiva',
-                    'Confermi di voler accettare anche se superi la soglia consigliata?',
-                    [
-                      { text: 'No, annulla', style: 'cancel', onPress: () => reject(new Error('annullato')) },
-                      {
-                        text: 'Sì, accetto',
-                        style: 'destructive',
-                        onPress: async () => {
-                          try { await SwapsApi.accept(id, true); resolve(); }
-                          catch (e2) { reject(e2); }
-                        },
-                      },
-                    ],
-                  );
-                },
-              },
-            ],
-          );
+          setWarnViolations(violations);
+          setWarnConfirmFn(() => async () => {
+            try { await SwapsApi.accept(id, true); resolve(); }
+            catch (e2) { reject(e2); }
+          });
+          setWarnOpen(true);
+          // user closes the modal → reject if no confirm
+          // resolve/reject are handled inside confirm or closeWarning
         });
       } else {
         throw e;
@@ -139,11 +122,26 @@ export default function SwapsScreen({ navigation }: Props) {
     }
   };
 
+  const closeWarning = () => {
+    setWarnOpen(false);
+    setWarnViolations([]);
+    setWarnConfirmFn(null);
+  };
+  const confirmWarning = async () => {
+    const fn = warnConfirmFn;
+    setWarnOpen(false);
+    if (fn) {
+      try { await fn(); } catch {}
+    }
+    setWarnConfirmFn(null);
+    setWarnViolations([]);
+  };
+
   // ---- nuova richiesta ----
   const openNew = async () => {
     setNewOpen(true);
     setMode('cessione');
-    setPickedShift(null); setPickedColleagues(new Set()); setPickedCounterShift(null);
+    setPickedShift(null); setPickedColleagues(new Set()); setPickedCounterShiftIds(new Set());
     setMessage(''); setStepError(null);
     try {
       const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -165,32 +163,50 @@ export default function SwapsScreen({ navigation }: Props) {
     return out;
   }, [days]);
 
-  // I turni del collega scelto (per scambio: 1 collega solo, futuri)
-  const counterShifts = useMemo<ShiftDto[]>(() => {
-    if (mode !== 'scambio' || pickedColleagues.size !== 1) return [];
-    const colleagueId = Array.from(pickedColleagues)[0];
-    const out: ShiftDto[] = [];
-    for (const d of days) for (const s of d.shifts) {
-      if (!s.isPast && s.medicoTurno?.id === colleagueId) out.push(s);
+  // Date dei miei turni → set di stringhe (per evitare candidati nello stesso giorno)
+  const myShiftDates = useMemo<Set<string>>(() => {
+    const s = new Set<string>();
+    for (const d of days) for (const sh of d.shifts) if (sh.isMineTurno && !sh.isPast) s.add(sh.date);
+    return s;
+  }, [days]);
+
+  // Turni candidati per scambio: tutti i turni futuri dei colleghi selezionati,
+  // raggruppati per collega. Esclude i turni in giorni in cui ho già un mio turno
+  // (per evitare che il sistema rifiuti subito per sovrapposizione).
+  type ColleagueGroup = { medico: MedicoDto; shifts: ShiftDto[] };
+  const counterGroups = useMemo<ColleagueGroup[]>(() => {
+    if (mode !== 'scambio' || pickedColleagues.size === 0) return [];
+    const out: ColleagueGroup[] = [];
+    for (const m of colleagues) {
+      if (!pickedColleagues.has(m.id)) continue;
+      const shifts: ShiftDto[] = [];
+      for (const d of days) for (const s of d.shifts) {
+        if (s.isPast) continue;
+        if (s.medicoTurno?.id !== m.id) continue;
+        if (myShiftDates.has(s.date) && s.date !== pickedShift?.date) continue;
+        shifts.push(s);
+      }
+      if (shifts.length > 0) out.push({ medico: m, shifts });
     }
     return out;
-  }, [days, mode, pickedColleagues]);
+  }, [days, mode, pickedColleagues, colleagues, myShiftDates, pickedShift]);
 
   const submitNew = async () => {
     if (!pickedShift || pickedColleagues.size === 0) return;
     setSubmitting(true); setStepError(null);
     try {
       if (mode === 'scambio') {
-        if (!pickedCounterShift) {
-          setStepError('Seleziona il turno del collega da prendere in cambio.');
+        if (pickedCounterShiftIds.size === 0) {
+          setStepError('Seleziona almeno un turno candidato dei colleghi.');
           setSubmitting(false);
           return;
         }
-        await SwapsApi.swap(pickedShift.id, pickedCounterShift.id, message || undefined);
+        await SwapsApi.swapMulti(pickedShift.id, Array.from(pickedCounterShiftIds), message || undefined);
       } else {
         await SwapsApi.giveawayMulti(pickedShift.id, Array.from(pickedColleagues), message || undefined);
       }
       setNewOpen(false);
+      setTab('outgoing');           // mostra subito la nuova richiesta in "Inviati"
       await loadLists();
     } catch (e: any) {
       const code = e?.response?.status;
@@ -405,7 +421,7 @@ export default function SwapsScreen({ navigation }: Props) {
           {/* Tipo richiesta */}
           <View style={{ flexDirection: 'row', gap: theme.spacing.s, marginBottom: theme.spacing.l }}>
             <TouchableOpacity
-              onPress={() => { setMode('cessione'); setPickedCounterShift(null); }}
+              onPress={() => { setMode('cessione'); setPickedCounterShiftIds(new Set()); }}
               style={{
                 flex: 1, padding: theme.spacing.m, borderRadius: theme.radius.m,
                 borderWidth: 2,
@@ -424,8 +440,7 @@ export default function SwapsScreen({ navigation }: Props) {
             <TouchableOpacity
               onPress={() => {
                 setMode('scambio');
-                // Scambio = max 1 collega
-                if (pickedColleagues.size > 1) setPickedColleagues(new Set());
+                setPickedCounterShiftIds(new Set());
               }}
               style={{
                 flex: 1, padding: theme.spacing.m, borderRadius: theme.radius.m,
@@ -487,7 +502,7 @@ export default function SwapsScreen({ navigation }: Props) {
             <>
               <Text style={[theme.typography.body, { fontWeight: '700', marginBottom: theme.spacing.s }]}>
                 <Icon name="people-outline" size={16} color={theme.colors.textPrimary} />
-                {'  '}2. {mode === 'scambio' ? 'Con chi scambi? (uno solo)' : 'A chi cedi? (seleziona uno o più)'}
+                {'  '}2. {mode === 'scambio' ? 'Con quali colleghi puoi scambiare?' : 'A chi cedi? (seleziona uno o più)'}
               </Text>
               {colleagues.map(m => {
                 const active = pickedColleagues.has(m.id);
@@ -496,13 +511,20 @@ export default function SwapsScreen({ navigation }: Props) {
                     key={m.id}
                     onPress={() => {
                       setPickedColleagues(prev => {
-                        if (mode === 'scambio') {
-                          const isSame = prev.has(m.id);
-                          setPickedCounterShift(null);
-                          return isSame ? new Set() : new Set([m.id]);
-                        }
                         const next = new Set(prev);
-                        if (next.has(m.id)) next.delete(m.id); else next.add(m.id);
+                        if (next.has(m.id)) {
+                          next.delete(m.id);
+                          // togli anche i suoi turni candidati selezionati
+                          setPickedCounterShiftIds(prevIds => {
+                            const ids = new Set(prevIds);
+                            for (const d of days) for (const s of d.shifts) {
+                              if (s.medicoTurno?.id === m.id) ids.delete(s.id);
+                            }
+                            return ids;
+                          });
+                        } else {
+                          next.add(m.id);
+                        }
                         return next;
                       });
                     }}
@@ -518,7 +540,7 @@ export default function SwapsScreen({ navigation }: Props) {
                     <Avatar fullName={m.fullName} url={m.avatarUrl} size={32} />
                     <Text style={[theme.typography.body, { flex: 1 }]}>{m.fullName}</Text>
                     <View style={{
-                      width: 22, height: 22, borderRadius: mode === 'scambio' ? 11 : 4,
+                      width: 22, height: 22, borderRadius: 4,
                       borderWidth: 2,
                       borderColor: active ? theme.colors.primary : theme.colors.border,
                       backgroundColor: active ? theme.colors.primary : 'transparent',
@@ -529,54 +551,78 @@ export default function SwapsScreen({ navigation }: Props) {
                   </TouchableOpacity>
                 );
               })}
-              {mode === 'cessione' && pickedColleagues.size > 1 ? (
+              {pickedColleagues.size > 1 ? (
                 <Text style={[theme.typography.caption, { color: theme.colors.textSecondary, marginBottom: theme.spacing.s }]}>
-                  Il primo che accetta prende il turno; gli altri riceveranno una cancellazione automatica.
+                  {mode === 'cessione'
+                    ? 'Il primo che accetta prende il turno; gli altri ricevono cancellazione automatica.'
+                    : 'Verranno create più richieste; appena una viene accettata le altre si cancellano da sole.'}
                 </Text>
               ) : null}
 
-              {/* Selezione contropartita per scambio */}
-              {mode === 'scambio' && pickedColleagues.size === 1 ? (
+              {/* Selezione turni candidati per scambio (raggruppati per collega) */}
+              {mode === 'scambio' && pickedColleagues.size >= 1 ? (
                 <>
                   <Text style={[theme.typography.body, { fontWeight: '700', marginBottom: theme.spacing.s, marginTop: theme.spacing.m }]}>
-                    <Icon name="repeat-outline" size={16} color={theme.colors.textPrimary} />  3. Quale suo turno prendi in cambio?
+                    <Icon name="repeat-outline" size={16} color={theme.colors.textPrimary} />  3. Quali turni potresti prendere in cambio? (seleziona uno o più)
                   </Text>
-                  {counterShifts.length === 0 ? (
+                  {counterGroups.length === 0 ? (
                     <View style={{ padding: theme.spacing.m, backgroundColor: theme.colors.surfaceAlt, borderRadius: theme.radius.m, marginBottom: theme.spacing.m }}>
                       <Text style={theme.typography.caption}>
-                        Il collega non ha turni futuri nei prossimi 30 giorni.
+                        Nessun turno candidato disponibile (nessun turno futuro nei colleghi scelti, oppure cadono in giorni in cui hai già un tuo turno).
                       </Text>
                     </View>
                   ) : (
-                    <View style={{ gap: 8, marginBottom: theme.spacing.m }}>
-                      {counterShifts.map(s => {
-                        const active = pickedCounterShift?.id === s.id;
-                        return (
-                          <TouchableOpacity
-                            key={s.id}
-                            onPress={() => setPickedCounterShift(s)}
-                            style={{
-                              flexDirection: 'row', alignItems: 'center', gap: 10,
-                              borderWidth: 1,
-                              borderColor: active ? theme.colors.primary : theme.colors.border,
-                              backgroundColor: active ? theme.colors.accent : theme.colors.surface,
-                              borderRadius: theme.radius.m, paddingHorizontal: 12, paddingVertical: 10,
-                            }}
-                          >
-                            <Icon name={shiftCodeIcon(s.code) as any} size={18} color={theme.colors.primary} />
-                            <Badge label={s.code} tone={shiftCodeTone(s.code) as any} />
-                            <View style={{ flex: 1 }}>
-                              <Text style={{ color: active ? theme.colors.primary : theme.colors.textPrimary, fontWeight: '600', textTransform: 'capitalize' }}>
-                                {formatDayLong(s.date, locale === 'it' ? 'it-IT' : 'en-GB')}
-                              </Text>
-                              <Text style={theme.typography.caption}>
-                                {shiftCodeShort(s.code)} · {s.startLocal} – {s.endLocal}
-                              </Text>
-                            </View>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
+                    counterGroups.map(g => (
+                      <View key={g.medico.id} style={{ marginBottom: theme.spacing.m }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: theme.spacing.s }}>
+                          <Avatar fullName={g.medico.fullName} url={g.medico.avatarUrl} size={22} />
+                          <Text style={[theme.typography.caption, { fontWeight: '700' }]}>{g.medico.fullName}</Text>
+                          <Text style={theme.typography.caption}>· {g.shifts.length} turni</Text>
+                        </View>
+                        <View style={{ gap: 6 }}>
+                          {g.shifts.map(s => {
+                            const active = pickedCounterShiftIds.has(s.id);
+                            return (
+                              <TouchableOpacity
+                                key={s.id}
+                                onPress={() => setPickedCounterShiftIds(prev => {
+                                  const next = new Set(prev);
+                                  if (next.has(s.id)) next.delete(s.id); else next.add(s.id);
+                                  return next;
+                                })}
+                                style={{
+                                  flexDirection: 'row', alignItems: 'center', gap: 10,
+                                  borderWidth: 1,
+                                  borderColor: active ? theme.colors.primary : theme.colors.border,
+                                  backgroundColor: active ? theme.colors.accent : theme.colors.surface,
+                                  borderRadius: theme.radius.m, paddingHorizontal: 12, paddingVertical: 10,
+                                }}
+                              >
+                                <Icon name={shiftCodeIcon(s.code) as any} size={18} color={theme.colors.primary} />
+                                <Badge label={s.code} tone={shiftCodeTone(s.code) as any} />
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ color: active ? theme.colors.primary : theme.colors.textPrimary, fontWeight: '600', textTransform: 'capitalize' }}>
+                                    {formatDayLong(s.date, locale === 'it' ? 'it-IT' : 'en-GB')}
+                                  </Text>
+                                  <Text style={theme.typography.caption}>
+                                    {shiftCodeShort(s.code)} · {s.startLocal} – {s.endLocal}
+                                  </Text>
+                                </View>
+                                <View style={{
+                                  width: 22, height: 22, borderRadius: 4,
+                                  borderWidth: 2,
+                                  borderColor: active ? theme.colors.primary : theme.colors.border,
+                                  backgroundColor: active ? theme.colors.primary : 'transparent',
+                                  alignItems: 'center', justifyContent: 'center',
+                                }}>
+                                  {active ? <Icon name="checkmark" size={14} color="#fff" /> : null}
+                                </View>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      </View>
+                    ))
                   )}
                 </>
               ) : null}
@@ -597,14 +643,14 @@ export default function SwapsScreen({ navigation }: Props) {
               <Button
                 title={
                   mode === 'scambio'
-                    ? 'Proponi scambio'
+                    ? (pickedCounterShiftIds.size > 1 ? `Proponi a ${pickedCounterShiftIds.size}` : 'Proponi scambio')
                     : pickedColleagues.size > 1 ? `Invia a ${pickedColleagues.size}` : 'Invia'
                 }
                 icon="send"
                 loading={submitting}
                 disabled={
                   !pickedShift || pickedColleagues.size === 0 ||
-                  (mode === 'scambio' && !pickedCounterShift)
+                  (mode === 'scambio' && pickedCounterShiftIds.size === 0)
                 }
                 onPress={submitNew}
               />
@@ -729,6 +775,56 @@ export default function SwapsScreen({ navigation }: Props) {
             </>
           ) : null}
         </ScrollView>
+      </Sheet>
+
+      {/* Sheet warning soglia di tutela (riposo / lavoro continuativo) */}
+      <Sheet visible={warnOpen} onClose={closeWarning} title="">
+        <View style={{ alignItems: 'center', marginBottom: theme.spacing.m }}>
+          <View style={{
+            width: 64, height: 64, borderRadius: 32,
+            backgroundColor: '#FEF3C7', alignItems: 'center', justifyContent: 'center',
+            marginBottom: theme.spacing.s,
+          }}>
+            <Icon name="moon-outline" size={34} color="#B45309" />
+          </View>
+          <Text style={[theme.typography.h2, { textAlign: 'center' }]}>Soglia di tutela superata</Text>
+          <Text style={[theme.typography.caption, { textAlign: 'center', marginTop: 4 }]}>
+            Stai per andare oltre i limiti consigliati di riposo / lavoro continuativo.
+          </Text>
+        </View>
+
+        <View style={{
+          backgroundColor: '#FFFBEB', borderColor: '#FCD34D', borderWidth: 1,
+          borderRadius: theme.radius.m, padding: theme.spacing.m, marginBottom: theme.spacing.m,
+        }}>
+          {warnViolations.map((v, i) => (
+            <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: i < warnViolations.length - 1 ? 6 : 0 }}>
+              <Icon name="alert-circle-outline" size={18} color="#B45309" />
+              <Text style={{ flex: 1, color: '#78350F', lineHeight: 20 }}>{v.message}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={{
+          backgroundColor: theme.colors.surfaceAlt, borderRadius: theme.radius.m,
+          padding: theme.spacing.m, marginBottom: theme.spacing.m,
+        }}>
+          <Text style={[theme.typography.caption, { lineHeight: 18 }]}>
+            <Text style={{ fontWeight: '700' }}>Nota:</Text>{' '}
+            la reperibilità è uno standby per le urgenze, non lavoro continuativo.
+            Valuta se ti senti di prenderti questa responsabilità.
+          </Text>
+        </View>
+
+        <View style={{ flexDirection: 'row', gap: theme.spacing.s }}>
+          <View style={{ flex: 1 }}>
+            <Button title="Annulla" variant="subtle" icon="close" onPress={closeWarning} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Button title="Accetto comunque" variant="danger" icon="checkmark"
+              onPress={confirmWarning} />
+          </View>
+        </View>
       </Sheet>
     </SafeAreaView>
   );
