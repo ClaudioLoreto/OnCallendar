@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, FlatList, RefreshControl, SafeAreaView, ScrollView, Text, TouchableOpacity, View,
 } from 'react-native';
@@ -52,8 +52,13 @@ export default function SwapsScreen({ navigation, route }: Props) {
   const [warnViolations, setWarnViolations] = useState<Array<{ message: string; ruleCode?: string }>>([]);
   const [warnConfirmFn, setWarnConfirmFn] = useState<(() => Promise<void>) | null>(null);
 
-  // Modal: scegli una data comune per proporre lo scambio a tutti i colleghi.
-  const [sameDateOpen, setSameDateOpen] = useState(false);
+  // Picker mode per scambio multi: 'common' = stessa data per tutti i colleghi
+  // selezionati; 'personalized' = scelta indipendente per ogni collega.
+  const [pickerMode, setPickerMode] = useState<'common' | 'personalized'>('personalized');
+
+  // Id dello swap evidenziato dopo deeplink da notifica (highlight transitorio).
+  const [highlightSwapId, setHighlightSwapId] = useState<string | null>(null);
+  const listRef = useRef<FlatList<SwapDto>>(null);
 
   // ----- Trattative -----
   const [counterSwap, setCounterSwap] = useState<SwapDto | null>(null);
@@ -87,15 +92,18 @@ export default function SwapsScreen({ navigation, route }: Props) {
       openNew({ shiftId: p.initialShiftId, mode: p.initialMode ?? 'cessione' });
       navigation.setParams?.({ initialShiftId: undefined, initialMode: undefined });
     } else if (p.openSwapId) {
-      // Carica le liste e poi apri la trattativa per quell'id.
+      // Carica le liste, switcha sul tab giusto, evidenzio la card e scrollo.
+      const targetId = p.openSwapId;
       (async () => {
         try {
           const [i, o] = await Promise.all([SwapsApi.incoming(), SwapsApi.outgoing()]);
           setIncoming(i); setOutgoing(o);
-          const target = i.find(s => s.id === p.openSwapId) ?? o.find(s => s.id === p.openSwapId);
+          const target = i.find(s => s.id === targetId) ?? o.find(s => s.id === targetId);
           if (target) {
             setTab(target.initiatorId === user?.userId ? 'outgoing' : 'incoming');
-            await openCounter(target);
+            setHighlightSwapId(targetId);
+            // Rimuovi l'highlight dopo 2.5s
+            setTimeout(() => setHighlightSwapId(null), 2500);
           }
         } catch {/* ignore */}
       })();
@@ -110,6 +118,17 @@ export default function SwapsScreen({ navigation, route }: Props) {
     catch (e: any) { setError(e?.response?.data?.error ?? e?.message ?? 'Errore'); }
     finally { setRefreshing(false); }
   };
+
+  // Scroll automatico quando arrivo da una notifica.
+  useEffect(() => {
+    if (!highlightSwapId) return;
+    const data = tab === 'incoming' ? incoming : outgoing;
+    const idx = data.findIndex(s => s.id === highlightSwapId);
+    if (idx < 0) return;
+    requestAnimationFrame(() => {
+      try { listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.2 }); } catch { /* noop */ }
+    });
+  }, [highlightSwapId, tab, incoming, outgoing]);
 
   const decide = async (id: string, action: 'accept' | 'reject' | 'cancel') => {
     setBusyKey(`${id}:${action}`); setError(null);
@@ -202,6 +221,7 @@ export default function SwapsScreen({ navigation, route }: Props) {
     setMode(next);
     setPickedColleagues(new Set());
     setPickedCounterShiftIds(new Set());
+    setPickerMode('personalized');
     setStepError(null);
   };
 
@@ -387,11 +407,13 @@ export default function SwapsScreen({ navigation, route }: Props) {
         <EmptyState title={t('common.loading')} />
       ) : (
         <FlatList
+          ref={listRef}
           contentContainerStyle={{ padding: theme.spacing.l, paddingTop: 0, paddingBottom: 120 }}
           data={list}
           keyExtractor={s => s.id}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={<EmptyState icon="swap-horizontal-outline" title={t('swaps.empty')} />}
+          onScrollToIndexFailed={() => {/* lista vuota o non ancora montata */}}
           ListHeaderComponent={
             error ? (
               <View style={{ backgroundColor: '#FBE3E1', padding: theme.spacing.m, borderRadius: theme.radius.m, marginBottom: theme.spacing.m }}>
@@ -401,8 +423,13 @@ export default function SwapsScreen({ navigation, route }: Props) {
           }
           renderItem={({ item }) => {
             const isIncoming = tab === 'incoming';
+            const highlighted = highlightSwapId === item.id;
             return (
-              <Card>
+              <Card style={highlighted ? {
+                borderWidth: 2,
+                borderColor: theme.colors.primary,
+                backgroundColor: theme.colors.accent,
+              } : undefined}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: theme.spacing.s }}>
                   <Text style={theme.typography.h3}>{swapTypeLabel(item.type)}</Text>
                   <Badge label={swapStatusLabel(item.status)} tone={swapStatusTone(item.status) as any} />
@@ -477,10 +504,31 @@ export default function SwapsScreen({ navigation, route }: Props) {
         />
       )}
 
-      {/* Floating Nuova richiesta */}
-      <View style={{ position: 'absolute', left: theme.spacing.l, right: theme.spacing.l, bottom: theme.spacing.l }}>
-        <Button title={t('swaps.new')} icon="add" onPress={() => openNew()} />
-      </View>
+      {/* FAB Nuova richiesta */}
+      <TouchableOpacity
+        activeOpacity={0.85}
+        onPress={() => openNew()}
+        style={{
+          position: 'absolute',
+          right: theme.spacing.l,
+          bottom: theme.spacing.l + 8,
+          backgroundColor: theme.colors.primary,
+          flexDirection: 'row', alignItems: 'center', gap: 8,
+          paddingHorizontal: 18, paddingVertical: 14,
+          borderRadius: 28,
+          ...theme.shadows.card,
+          shadowOpacity: 0.25, shadowRadius: 12, elevation: 8,
+        }}
+        accessibilityLabel={t('swaps.new')}
+      >
+        <Icon name="add" size={20} color={theme.scheme === 'dark' ? theme.colors.background : '#fff'} />
+        <Text style={{
+          color: theme.scheme === 'dark' ? theme.colors.background : '#fff',
+          fontWeight: '700',
+        }}>
+          {t('swaps.new')}
+        </Text>
+      </TouchableOpacity>
 
       {/* Sheet wizard nuova richiesta */}
       <Sheet visible={newOpen} onClose={() => setNewOpen(false)} title={t('swaps.new')}>
@@ -650,22 +698,121 @@ export default function SwapsScreen({ navigation, route }: Props) {
                       <Icon name="repeat-outline" size={16} color={theme.colors.textPrimary} />  3. Quali turni potresti prendere in cambio?
                     </Text>
                   </View>
-                  {pickedColleagues.size > 1 && counterGroups.length > 0 ? (
-                    <View style={{ marginBottom: theme.spacing.s }}>
-                      <Button
-                        title="Stessa data per tutti…"
-                        icon="calendar-outline"
-                        variant="subtle" compact
-                        onPress={() => setSameDateOpen(true)}
-                      />
+                  {pickedColleagues.size > 1 ? (
+                    <View style={{ flexDirection: 'row', backgroundColor: theme.colors.surfaceAlt, borderRadius: theme.radius.m, padding: 4, marginBottom: theme.spacing.m }}>
+                      {(['common', 'personalized'] as const).map(m => {
+                        const active = pickerMode === m;
+                        return (
+                          <TouchableOpacity
+                            key={m}
+                            onPress={() => {
+                              if (pickerMode === m) return;
+                              setPickerMode(m);
+                              setPickedCounterShiftIds(new Set());
+                            }}
+                            style={{
+                              flex: 1, paddingVertical: 8, borderRadius: theme.radius.m - 2,
+                              backgroundColor: active ? theme.colors.surface : 'transparent',
+                              alignItems: 'center',
+                              ...(active ? theme.shadows.card : {}),
+                            }}>
+                            <Text style={{
+                              fontSize: 13,
+                              fontWeight: active ? '700' : '500',
+                              color: active ? theme.colors.primary : theme.colors.textSecondary,
+                            }}>
+                              {m === 'common' ? 'Stessa data per tutti' : 'Per ogni collega'}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
                     </View>
                   ) : null}
+
                   {counterGroups.length === 0 ? (
                     <View style={{ padding: theme.spacing.m, backgroundColor: theme.colors.surfaceAlt, borderRadius: theme.radius.m, marginBottom: theme.spacing.m }}>
                       <Text style={theme.typography.caption}>
                         Nessun turno candidato disponibile (nessun turno futuro nei colleghi scelti, oppure cadono in giorni in cui hai già un tuo turno).
                       </Text>
                     </View>
+                  ) : pickerMode === 'common' && pickedColleagues.size > 1 ? (
+                    /* Picker comune: lista delle date in cui almeno un collega selezionato lavora */
+                    (() => {
+                      const dateMap = new Map<string, Set<string>>();
+                      for (const g of counterGroups) {
+                        for (const s of g.shifts) {
+                          if (!dateMap.has(s.date)) dateMap.set(s.date, new Set());
+                          dateMap.get(s.date)!.add(g.medico.id);
+                        }
+                      }
+                      const dates = Array.from(dateMap.entries()).sort(([a], [b]) => a.localeCompare(b));
+                      if (dates.length === 0) {
+                        return (
+                          <Text style={[theme.typography.caption, { textAlign: 'center', padding: theme.spacing.m }]}>
+                            Nessuna data condivisa tra i colleghi selezionati.
+                          </Text>
+                        );
+                      }
+                      return (
+                        <View style={{ gap: 6, marginBottom: theme.spacing.m }}>
+                          {dates.map(([date, colleagueIds]) => {
+                            // shiftIds di questa data
+                            const shiftIds: string[] = [];
+                            for (const g of counterGroups) {
+                              if (!colleagueIds.has(g.medico.id)) continue;
+                              for (const s of g.shifts) if (s.date === date) shiftIds.push(s.id);
+                            }
+                            const allActive = shiftIds.every(id => pickedCounterShiftIds.has(id));
+                            return (
+                              <TouchableOpacity
+                                key={date}
+                                onPress={() => setPickedCounterShiftIds(prev => {
+                                  const next = new Set(prev);
+                                  if (allActive) {
+                                    for (const id of shiftIds) next.delete(id);
+                                  } else {
+                                    // Sostituisco completamente la selezione corrente con questa data,
+                                    // così l'utente sceglie UNA data comune.
+                                    next.clear();
+                                    for (const id of shiftIds) next.add(id);
+                                  }
+                                  return next;
+                                })}
+                                style={{
+                                  flexDirection: 'row', alignItems: 'center', gap: 10,
+                                  borderWidth: 1,
+                                  borderColor: allActive ? theme.colors.primary : theme.colors.border,
+                                  backgroundColor: allActive ? theme.colors.accent : theme.colors.surface,
+                                  borderRadius: theme.radius.m, padding: theme.spacing.m,
+                                }}>
+                                <Icon name="calendar-outline" size={20} color={allActive ? theme.colors.primary : theme.colors.textSecondary} />
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{
+                                    fontWeight: '600',
+                                    color: allActive ? theme.colors.primary : theme.colors.textPrimary,
+                                    textTransform: 'capitalize',
+                                  }}>
+                                    {formatDayLong(date, locale === 'it' ? 'it-IT' : 'en-GB')}
+                                  </Text>
+                                  <Text style={theme.typography.caption}>
+                                    {colleagueIds.size} {colleagueIds.size === 1 ? 'collega' : 'colleghi'} · {shiftIds.length} turni
+                                  </Text>
+                                </View>
+                                <View style={{
+                                  width: 22, height: 22, borderRadius: 11,
+                                  borderWidth: 2,
+                                  borderColor: allActive ? theme.colors.primary : theme.colors.border,
+                                  backgroundColor: allActive ? theme.colors.primary : 'transparent',
+                                  alignItems: 'center', justifyContent: 'center',
+                                }}>
+                                  {allActive ? <Icon name="checkmark" size={14} color="#fff" /> : null}
+                                </View>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      );
+                    })()
                   ) : (
                     counterGroups.map(g => (
                       <View key={g.medico.id} style={{ marginBottom: theme.spacing.m }}>
@@ -932,71 +1079,6 @@ export default function SwapsScreen({ navigation, route }: Props) {
               onPress={confirmWarning} />
           </View>
         </View>
-      </Sheet>
-
-      {/* Sheet: stessa data per tutti i colleghi selezionati */}
-      <Sheet visible={sameDateOpen} onClose={() => setSameDateOpen(false)} title="Stessa data per tutti">
-        {(() => {
-          // Mappa: data → numero di colleghi (tra quelli selezionati) che hanno
-          // un turno in quel giorno. Mostro solo le date in cui almeno un
-          // collega selezionato pu\u00f2 offrire qualcosa.
-          const dateToColleagueIds = new Map<string, Set<string>>();
-          for (const g of counterGroups) {
-            for (const s of g.shifts) {
-              if (!dateToColleagueIds.has(s.date)) dateToColleagueIds.set(s.date, new Set());
-              dateToColleagueIds.get(s.date)!.add(g.medico.id);
-            }
-          }
-          const dates = Array.from(dateToColleagueIds.entries())
-            .sort(([a], [b]) => a.localeCompare(b));
-          if (dates.length === 0) {
-            return (
-              <Text style={[theme.typography.caption, { textAlign: 'center', padding: theme.spacing.m }]}>
-                Nessuna data disponibile per i colleghi selezionati.
-              </Text>
-            );
-          }
-          return (
-            <ScrollView>
-              <Text style={[theme.typography.caption, { marginBottom: theme.spacing.m }]}>
-                Scegli un giorno: aggiunger\u00f2 ai candidati il turno di ogni collega che lavora in quella data.
-              </Text>
-              {dates.map(([date, colleagueIds]) => (
-                <TouchableOpacity
-                  key={date}
-                  onPress={() => {
-                    setPickedCounterShiftIds(prev => {
-                      const next = new Set(prev);
-                      for (const g of counterGroups) {
-                        if (!colleagueIds.has(g.medico.id)) continue;
-                        for (const s of g.shifts) if (s.date === date) next.add(s.id);
-                      }
-                      return next;
-                    });
-                    setSameDateOpen(false);
-                  }}
-                  style={{
-                    flexDirection: 'row', alignItems: 'center', gap: 10,
-                    borderWidth: 1, borderColor: theme.colors.border,
-                    backgroundColor: theme.colors.surface,
-                    borderRadius: theme.radius.m, padding: theme.spacing.m,
-                    marginBottom: theme.spacing.s,
-                  }}>
-                  <Icon name="calendar-outline" size={18} color={theme.colors.primary} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[theme.typography.body, { fontWeight: '600', textTransform: 'capitalize' }]}>
-                      {formatDayLong(date, locale === 'it' ? 'it-IT' : 'en-GB')}
-                    </Text>
-                    <Text style={theme.typography.caption}>
-                      {colleagueIds.size} {colleagueIds.size === 1 ? 'collega disponibile' : 'colleghi disponibili'}
-                    </Text>
-                  </View>
-                  <Icon name="chevron-forward" size={18} color={theme.colors.textMuted} />
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          );
-        })()}
       </Sheet>
     </SafeAreaView>
   );

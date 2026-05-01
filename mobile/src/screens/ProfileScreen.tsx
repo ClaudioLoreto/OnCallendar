@@ -211,7 +211,6 @@ export default function ProfileScreen({ navigation }: Props) {
             options={[
               { label: t('profile.theme.light'), value: 'light' },
               { label: t('profile.theme.dark'), value: 'dark' },
-              { label: t('profile.theme.system'), value: 'system' },
             ]}
           />
 

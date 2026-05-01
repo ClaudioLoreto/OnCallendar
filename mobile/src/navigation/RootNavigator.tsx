@@ -3,7 +3,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { useAuth } from '../auth/AuthContext';
 import { useTheme } from '../theme/ThemeContext';
@@ -19,9 +19,10 @@ import NotificationsScreen from '../screens/NotificationsScreen';
 const Tabs = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
-const tabIcon = (emoji: string) => ({ color, focused }: { color: string; focused: boolean }) => (
-  <Text style={{ fontSize: focused ? 22 : 18 }}>{emoji}</Text>
-);
+const tabIcon = (name: keyof typeof Ionicons.glyphMap, focusedName?: keyof typeof Ionicons.glyphMap) =>
+  ({ color, focused, size }: { color: string; focused: boolean; size: number }) => (
+    <Ionicons name={focused ? (focusedName ?? name) : name} size={size} color={color} />
+  );
 
 const MainTabs: React.FC = () => {
   const { theme } = useTheme();
@@ -39,8 +40,8 @@ const MainTabs: React.FC = () => {
         tabBarLabelStyle: { fontWeight: '600' },
       }}
     >
-      <Tabs.Screen name="Calendar" component={CalendarScreen} options={{ title: t('tabs.calendar'), tabBarIcon: tabIcon('📅') }} />
-      <Tabs.Screen name="Swaps"    component={SwapsScreen}    options={{ title: t('tabs.swaps'),    tabBarIcon: tabIcon('🔄') }} />
+      <Tabs.Screen name="Calendar" component={CalendarScreen} options={{ title: t('tabs.calendar'), tabBarIcon: tabIcon('calendar-outline', 'calendar') }} />
+      <Tabs.Screen name="Swaps"    component={SwapsScreen}    options={{ title: t('tabs.swaps'),    tabBarIcon: tabIcon('swap-horizontal-outline', 'swap-horizontal') }} />
     </Tabs.Navigator>
   );
 };
@@ -78,12 +79,14 @@ const RootNavigator: React.FC = () => {
             headerStyle: { backgroundColor: theme.colors.surface },
             headerTintColor: theme.colors.textPrimary,
             headerTitleStyle: { fontWeight: '700' },
-          }}
+            headerBackTitle: '',
+            headerBackTitleVisible: false,
+          } as any}
         >
-          <Stack.Screen name="Main"          component={MainTabs}           options={{ headerShown: false, headerBackTitle: '' }} />
-          <Stack.Screen name="Profile"       component={ProfileScreen}      options={{ title: t('profile.title'), headerBackTitle: '' }} />
-          <Stack.Screen name="History"       component={HistoryScreen}      options={{ title: t('profile.section.history'), headerBackTitle: '' }} />
-          <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifiche', headerBackTitle: '' }} />
+          <Stack.Screen name="Main"          component={MainTabs}           options={{ headerShown: false }} />
+          <Stack.Screen name="Profile"       component={ProfileScreen}      options={{ title: t('profile.title') }} />
+          <Stack.Screen name="History"       component={HistoryScreen}      options={{ title: t('profile.section.history') }} />
+          <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifiche' }} />
         </Stack.Navigator>
       ) : (
         <Stack.Navigator screenOptions={{ headerShown: false }}>

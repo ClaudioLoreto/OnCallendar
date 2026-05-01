@@ -230,12 +230,6 @@ export default function CalendarScreen({ navigation }: Props) {
                 variant="secondary"
                 onPress={() => goToWizard('scambio')}
               />
-              <Button
-                title="Annulla"
-                icon="close"
-                variant="ghost"
-                onPress={() => setActionShift(null)}
-              />
             </View>
           </ScrollView>
         ) : null}
