@@ -46,7 +46,18 @@ public static class DbSeeder
             await db.Database.EnsureDeletedAsync(ct);
         }
 
-        await db.Database.MigrateAsync(ct);
+        // Le migrations attuali sono SqlServer-specific (nvarchar/datetime2).
+        // Su Postgres (Railway) usiamo EnsureCreated, che genera lo schema dal modello
+        // attraverso il provider corrente.
+        var providerName = db.Database.ProviderName ?? string.Empty;
+        if (providerName.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await db.Database.EnsureCreatedAsync(ct);
+        }
+        else
+        {
+            await db.Database.MigrateAsync(ct);
+        }
 
         // Roles
         foreach (var role in new[] { SuperAdminRole, MedicoRole })

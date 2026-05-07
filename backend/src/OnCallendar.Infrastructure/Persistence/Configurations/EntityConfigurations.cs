@@ -119,8 +119,9 @@ public class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         b.Property(x => x.EntityType).IsRequired().HasMaxLength(100);
         b.Property(x => x.Action).IsRequired().HasMaxLength(80);
         b.Property(x => x.PerformedByUserName).HasMaxLength(256);
-        b.Property(x => x.OldValuesJson).HasColumnType("nvarchar(max)");
-        b.Property(x => x.NewValuesJson).HasColumnType("nvarchar(max)");
+        // Provider-agnostic: SqlServer mappa string→nvarchar(max), Npgsql→text.
+        b.Property(x => x.OldValuesJson);
+        b.Property(x => x.NewValuesJson);
         b.HasIndex(x => new { x.TenantId, x.EntityType, x.EntityId });
     }
 }

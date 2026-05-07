@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+**/.vs/
+**/*.user
+**/*.suo
+**/.idea/
+**/.git/
+**/.gitignore
+**/Dockerfile
+**/.dockerignore
+*.log
+api.log
+api.err.log

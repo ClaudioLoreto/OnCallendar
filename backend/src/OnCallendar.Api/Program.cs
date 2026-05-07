@@ -23,8 +23,17 @@ var builder = WebApplication.CreateBuilder(args);
 // CRITICO PER TEST DA iPHONE (Expo Go) SULLA STESSA RETE Wi-Fi:
 // In ascolto su TUTTE le interfacce di rete della macchina Windows.
 // Così l'iPhone può raggiungere http://<IP-LAN-PC>:5000/...
+// In produzione (Railway) bindiamo solo sulla PORT fornita.
 // -------------------------------------------------------------------------
-builder.WebHost.UseUrls("http://0.0.0.0:5000", "https://0.0.0.0:5001");
+if (builder.Environment.IsDevelopment())
+{
+    builder.WebHost.UseUrls("http://0.0.0.0:5000", "https://0.0.0.0:5001");
+}
+else
+{
+    var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
+    builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+}
 
 // -------------------------------------------------------------------------
 // CORS per app mobile in development. In Expo Go, durante il dev,
@@ -42,7 +51,25 @@ builder.Services.AddCors(o => o.AddPolicy(DevCorsPolicy, p =>
 }));
 
 builder.Services.AddDbContext<ApplicationDbContext>(opt =>
-    opt.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+{
+    var provider = (Environment.GetEnvironmentVariable("DB_PROVIDER")
+                    ?? builder.Configuration["Database:Provider"]
+                    ?? "sqlserver").ToLowerInvariant();
+
+    if (provider == "postgres" || provider == "postgresql")
+    {
+        // Railway iniettà DATABASE_URL nel formato postgres://user:pass@host:port/db.
+        var raw = Environment.GetEnvironmentVariable("DATABASE_URL")
+                  ?? builder.Configuration.GetConnectionString("DefaultConnection")
+                  ?? throw new InvalidOperationException("DATABASE_URL non impostato");
+        var conn = DbConnectionStringHelper.NormalizeNpgsql(raw);
+        opt.UseNpgsql(conn);
+    }
+    else
+    {
+        opt.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
+    }
+});
 
 builder.Services.AddScoped<IApplicationDbContext>(sp =>
     sp.GetRequiredService<ApplicationDbContext>());
