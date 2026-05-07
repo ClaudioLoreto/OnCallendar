@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using OnCallendar.Domain.Entities;
+using OnCallendar.Infrastructure.Persistence;
 
 namespace OnCallendar.Infrastructure.Persistence.Configurations;
 
@@ -40,7 +41,11 @@ public class ApplicationUserConfiguration : IEntityTypeConfiguration<Application
             .OnDelete(DeleteBehavior.Restrict);
 
         b.HasIndex(x => new { x.TenantId, x.MedicoNumber });
-        b.HasIndex(x => x.Badge).IsUnique().HasFilter("[Badge] IS NOT NULL");
+        // Filter sintassi SqlServer-only: in Postgres NULL ≠ NULL già di default,
+        // quindi un indice unique nullable non genera collisioni.
+        var badgeIndex = b.HasIndex(x => x.Badge).IsUnique();
+        if (DatabaseProviderHelper.IsSqlServer)
+            badgeIndex.HasFilter("[Badge] IS NOT NULL");
     }
 }
 

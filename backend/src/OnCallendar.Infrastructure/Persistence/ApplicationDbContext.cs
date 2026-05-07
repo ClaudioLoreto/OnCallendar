@@ -55,5 +55,23 @@ public class ApplicationDbContext
 
         builder.Entity<SwapCounterOffer>().HasQueryFilter(o =>
             currentTenantId == null || o.TenantId == currentTenantId);
+
+        // Su Postgres, rimuovi tutti i filtri SqlServer-style ("[Col] IS NOT NULL")
+        // ereditati da ASP.NET Identity e da EF: Postgres tratta NULL come distinti,
+        // quindi gli indici unique nullable funzionano senza filtro.
+        if (!DatabaseProviderHelper.IsSqlServer)
+        {
+            foreach (var entityType in builder.Model.GetEntityTypes())
+            {
+                foreach (var index in entityType.GetIndexes())
+                {
+                    var filter = index.GetFilter();
+                    if (!string.IsNullOrEmpty(filter) && filter.Contains('['))
+                    {
+                        index.SetFilter(null);
+                    }
+                }
+            }
+        }
     }
 }
