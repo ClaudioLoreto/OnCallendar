@@ -11,6 +11,11 @@
     },
     "ios": { "supportsTablet": true },
     "android": { "package": "local.oncallendar" },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/icon.png"
+    },
     "extra": {
       "apiBaseUrl": "https://api-production-e42a.up.railway.app"
     }

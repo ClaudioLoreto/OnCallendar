@@ -9,5 +9,9 @@
 **/Dockerfile
 **/.dockerignore
 *.log
-api.log
-api.err.log
+backend/api.log
+backend/api.err.log
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/.env
