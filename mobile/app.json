@@ -12,7 +12,7 @@
     "ios": { "supportsTablet": true },
     "android": { "package": "local.oncallendar" },
     "extra": {
-      "apiBaseUrl": null
+      "apiBaseUrl": "https://api-production-e42a.up.railway.app"
     }
   }
 }
