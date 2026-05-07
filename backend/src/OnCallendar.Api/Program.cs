@@ -177,6 +177,26 @@ var wwwroot = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
 Directory.CreateDirectory(Path.Combine(wwwroot, "uploads", "avatars"));
 app.UseStaticFiles();
 
+// SPA Web app: serve i file statici esportati da Expo Web (wwwroot/app)
+// come root del sito, e fa fallback su index.html per il client routing.
+var spaRoot = Path.Combine(wwwroot, "app");
+var spaEnabled = Directory.Exists(spaRoot);
+if (spaEnabled)
+{
+    app.UseDefaultFiles(new Microsoft.AspNetCore.Builder.DefaultFilesOptions
+    {
+        FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(spaRoot),
+        RequestPath = string.Empty,
+        DefaultFileNames = new List<string> { "index.html" },
+    });
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(spaRoot),
+        RequestPath = string.Empty,
+        ServeUnknownFileTypes = true,
+    });
+}
+
 app.UseCors(DevCorsPolicy);
 app.UseAuthentication();
 app.UseAuthorization();
@@ -184,14 +204,12 @@ app.MapControllers();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", time = DateTime.UtcNow }));
 
-// SPA Web app: serve i file statici esportati da Expo Web (wwwroot/app)
-// e fa il fallback di tutte le rotte non /api, non /swagger e non /uploads
-// su index.html, così il client routing funziona anche su refresh.
-var spaRoot = Path.Combine(wwwroot, "app");
-if (Directory.Exists(spaRoot))
+if (spaEnabled)
 {
     var indexHtml = Path.Combine(spaRoot, "index.html");
-    app.MapFallback(async ctx =>
+    // Fallback per client routing: qualsiasi path non /api, /swagger, /uploads, /health
+    // (e che non sia gi\u00e0 stato servito come file statico) torna su index.html.
+    app.MapFallback("{**path}", async ctx =>
     {
         var path = ctx.Request.Path.Value ?? string.Empty;
         if (path.StartsWith("/api", StringComparison.OrdinalIgnoreCase) ||
@@ -202,33 +220,6 @@ if (Directory.Exists(spaRoot))
             ctx.Response.StatusCode = StatusCodes.Status404NotFound;
             return;
         }
-
-        // Tenta di servire un file specifico richiesto (asset, _expo, ...)
-        var requested = Path.Combine(spaRoot, path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
-        if (File.Exists(requested))
-        {
-            var ext = Path.GetExtension(requested).ToLowerInvariant();
-            var mime = ext switch
-            {
-                ".js" => "application/javascript",
-                ".css" => "text/css",
-                ".html" => "text/html",
-                ".json" => "application/json",
-                ".png" => "image/png",
-                ".jpg" or ".jpeg" => "image/jpeg",
-                ".svg" => "image/svg+xml",
-                ".ttf" => "font/ttf",
-                ".woff" => "font/woff",
-                ".woff2" => "font/woff2",
-                ".ico" => "image/x-icon",
-                _ => "application/octet-stream",
-            };
-            ctx.Response.ContentType = mime;
-            await ctx.Response.SendFileAsync(requested);
-            return;
-        }
-
-        // Fallback su index.html per il client routing
         ctx.Response.ContentType = "text/html";
         await ctx.Response.SendFileAsync(indexHtml);
     });
