@@ -172,30 +172,11 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// Static files per avatar caricati dagli utenti
+// Static files per avatar caricati dagli utenti + SPA Web (Expo export → wwwroot/)
 var wwwroot = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
 Directory.CreateDirectory(Path.Combine(wwwroot, "uploads", "avatars"));
+app.UseDefaultFiles();   // serve index.html per "/"
 app.UseStaticFiles();
-
-// SPA Web app: serve i file statici esportati da Expo Web (wwwroot/app)
-// come root del sito, e fa fallback su index.html per il client routing.
-var spaRoot = Path.Combine(wwwroot, "app");
-var spaEnabled = Directory.Exists(spaRoot);
-if (spaEnabled)
-{
-    app.UseDefaultFiles(new Microsoft.AspNetCore.Builder.DefaultFilesOptions
-    {
-        FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(spaRoot),
-        RequestPath = string.Empty,
-        DefaultFileNames = new List<string> { "index.html" },
-    });
-    app.UseStaticFiles(new StaticFileOptions
-    {
-        FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(spaRoot),
-        RequestPath = string.Empty,
-        ServeUnknownFileTypes = true,
-    });
-}
 
 app.UseCors(DevCorsPolicy);
 app.UseAuthentication();
@@ -204,11 +185,11 @@ app.MapControllers();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", time = DateTime.UtcNow }));
 
-if (spaEnabled)
+// SPA fallback: per qualsiasi rotta del client (non /api, /swagger, /uploads, /health)
+// rimanda a index.html così il client routing funziona anche su refresh.
+var indexHtml = Path.Combine(wwwroot, "index.html");
+if (File.Exists(indexHtml))
 {
-    var indexHtml = Path.Combine(spaRoot, "index.html");
-    // Fallback per client routing: qualsiasi path non /api, /swagger, /uploads, /health
-    // (e che non sia gi\u00e0 stato servito come file statico) torna su index.html.
     app.MapFallback("{**path}", async ctx =>
     {
         var path = ctx.Request.Path.Value ?? string.Empty;

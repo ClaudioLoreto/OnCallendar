@@ -29,8 +29,8 @@ RUN dotnet publish src/OnCallendar.Api/OnCallendar.Api.csproj \
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 COPY --from=build /app/publish ./
-# Web SPA copiata in wwwroot/app: l'API la serve come fallback su rotte non /api
-COPY --from=web /web/dist ./wwwroot/app
+# Web SPA copiata direttamente in wwwroot (servita da UseStaticFiles)
+COPY --from=web /web/dist ./wwwroot/
 
 # Railway inietta $PORT (di solito 8080); l'app legge env e usa quella
 ENV ASPNETCORE_URLS=http://0.0.0.0:8080
