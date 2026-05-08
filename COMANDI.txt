@@ -1,0 +1,365 @@
+================================================================================
+  OnCallendar — CHEAT SHEET COMANDI
+  Ultimo aggiornamento: 8 maggio 2026
+================================================================================
+
+Questo file raccoglie TUTTI i comandi utili per lavorare al progetto.
+Ogni sezione indica: il PATH (cartella) da cui lanciare il comando + il COMANDO
+esatto + cosa fa.
+
+Tutti i path sono relativi alla root del repo:
+  C:\Users\Clore\Sviluppo\OnCallendar
+
+
+================================================================================
+ 0. STRUTTURA DEL REPO
+================================================================================
+
+OnCallendar/
+├── backend/                  → API .NET 8 (Clean Architecture)
+│   └── src/
+│       ├── OnCallendar.Api/            ← entry point (Program.cs)
+│       ├── OnCallendar.Application/
+│       ├── OnCallendar.Domain/
+│       └── OnCallendar.Infrastructure/
+│
+├── mobile/                   → codebase React Native (Expo) — UNICA SORGENTE
+│   ├── src/                    ← schermate, componenti, api client, theme
+│   ├── app.json                ← config Expo (iOS + Android + Web)
+│   ├── .env                    ← override URL API in dev (vuoto = auto-detect)
+│   └── package.json
+│
+├── web/                      → cartella dedicata SOLO al deploy web
+│   ├── README.md               ← spiegazione architettura web
+│   └── dist/                   ← output di "expo export -p web" (gitignored)
+│
+├── Dockerfile                → multi-stage: mobile → web/dist → wwwroot/ + .NET
+├── railway.toml              → forza Railway a usare Dockerfile (no Nixpacks)
+└── .dockerignore
+
+
+================================================================================
+ 1. CREDENZIALI APP (backend già seedato)
+================================================================================
+
+Tenant: Navelli (default)
+
+Admin:
+  email:    admin@oncallendar.local
+  password: Admin#2026!
+
+Medici (login via email OPPURE badge):
+  ┌──────┬──────────────────────────────────────────┬─────────────┐
+  │ Badge│ Email                                    │ Nome        │
+  ├──────┼──────────────────────────────────────────┼─────────────┤
+  │ M01  │ superboy23+claudia@gmail.com             │ Claudia I.  │
+  │ M02  │ superboy23+edoardo@gmail.com             │ Edoardo L.  │
+  │ M03  │ superboy23+emanuele@gmail.com            │ Emanuele D. │
+  │ M04  │ superboy23+alessandro@gmail.com          │ Alessandro  │
+  └──────┴──────────────────────────────────────────┴─────────────┘
+  password (tutti): Medico#2026!
+
+
+================================================================================
+ 2. SVILUPPO LOCALE — TEST CON EXPO GO SU iPHONE
+================================================================================
+
+Workflow tipico durante lo sviluppo: backend locale + Expo Go.
+Niente Railway, niente tunnel, niente push.
+
+────────────────────────────────────────────────────────────────────────────────
+ 2.1  Avviare il BACKEND locale (.NET)
+────────────────────────────────────────────────────────────────────────────────
+
+PATH:    C:\Users\Clore\Sviluppo\OnCallendar\backend
+COMANDO: dotnet run --project src\OnCallendar.Api
+
+Cosa fa:
+  - Avvia l'API in ascolto su http://0.0.0.0:5000
+  - Si bind su tutte le interfacce → l'iPhone sulla stessa Wi-Fi può chiamarla
+  - Usa SQL Server LocalDB (database locale "OnCallendar")
+  - Esegue le migrations + seed automatico al primo avvio
+
+Verifica che funzioni:
+  http://localhost:5000/health
+  → { "status": "ok", "time": "..." }
+
+Per fermarlo:  Ctrl+C nel terminale.
+
+────────────────────────────────────────────────────────────────────────────────
+ 2.2  Avviare il CLIENT Expo (per Expo Go su iPhone)
+────────────────────────────────────────────────────────────────────────────────
+
+In un SECONDO terminale, lasciando il backend acceso:
+
+PATH:    C:\Users\Clore\Sviluppo\OnCallendar\mobile
+COMANDO: npm start
+
+Cosa fa:
+  - Avvia Metro bundler su http://localhost:8081
+  - Mostra un QR code da scansionare con Expo Go (iOS)
+  - L'app, una volta aperta, rileva automaticamente l'IP LAN del PC e
+    chiama http://<IP-LAN-PC>:5000 (vedi mobile/src/api/apiClient.ts)
+
+Tasti utili dentro Metro:
+  r       → reload app
+  shift+m → menu dev
+  j       → apri debugger
+  Ctrl+C  → ferma Metro
+
+────────────────────────────────────────────────────────────────────────────────
+ 2.3  iPhone non si connette al backend?
+────────────────────────────────────────────────────────────────────────────────
+
+Spesso è un problema di firewall Windows.
+
+A) Trova l'IP LAN del PC (PATH: ovunque)
+   ipconfig | Select-String "IPv4"
+
+B) Apri il firewall sulla porta 5000 (PowerShell ADMIN, una sola volta)
+   New-NetFirewallRule -DisplayName "OnCallendar Dev API" -Direction Inbound `
+       -Protocol TCP -LocalPort 5000 -Action Allow
+
+C) Test dal browser dell'iPhone:
+   http://<IP-LAN-PC>:5000/health
+   Deve mostrare { "status": "ok" }.
+
+D) Forza l'IP nel client (se l'auto-detect non funziona):
+   modifica mobile/.env:
+     EXPO_PUBLIC_API_BASE_URL=http://192.168.x.x:5000
+   Poi riavvia Expo (cd mobile; npm start).
+
+
+================================================================================
+ 3. TEST WEB IN LOCALE (browser, opzionale)
+================================================================================
+
+Se ti serve testare la WebApp sul tuo browser SENZA passare da Railway:
+
+PATH:    C:\Users\Clore\Sviluppo\OnCallendar\mobile
+COMANDO: npm run web
+
+Cosa fa:
+  - Avvia Metro per web su http://localhost:8081
+  - Apre la WebApp nel browser
+  - Userà window.location.origin come API base → quindi punterà a localhost:8081
+    e NON al backend. Per usare il backend locale anche su web, setta in
+    mobile/.env:
+      EXPO_PUBLIC_API_BASE_URL=http://localhost:5000
+
+
+================================================================================
+ 4. PUBBLICARE SU RAILWAY (production)
+================================================================================
+
+Il deploy NON è automatico: si fa solo quando vuoi tu.
+
+────────────────────────────────────────────────────────────────────────────────
+ 4.1  Workflow di pubblicazione tipico
+────────────────────────────────────────────────────────────────────────────────
+
+PATH:    C:\Users\Clore\Sviluppo\OnCallendar
+COMANDI (in ordine):
+
+  # 1. Salva tutto su git (locale)
+  git add -A
+  git commit -m "descrizione modifiche"
+
+  # 2. Allinea GitHub
+  git push origin main
+
+  # 3. Deploy su Railway
+  $env:RAILWAY_TOKEN="99d91753-d986-4800-b6ba-a4dd0e96ffa5"
+  railway up --service "api." --ci --detach
+
+Il deploy:
+  - Builda l'immagine via Dockerfile (multi-stage):
+      stage 1 = node 20 + expo export -p web (output in /work/web/dist)
+      stage 2 = .NET 8 SDK build
+      stage 3 = ASP.NET runtime + copia wwwroot/ con la SPA
+  - Riavvia il container su https://api-production-e42a.up.railway.app
+  - Migra il DB Postgres (Railway) e ri-seeda se vuoto
+
+Tempo: ~2-3 minuti.
+
+────────────────────────────────────────────────────────────────────────────────
+ 4.2  Verificare lo stato del deploy
+────────────────────────────────────────────────────────────────────────────────
+
+PATH:    C:\Users\Clore\Sviluppo\OnCallendar
+COMANDO:
+  $env:RAILWAY_TOKEN="99d91753-d986-4800-b6ba-a4dd0e96ffa5"
+  railway status
+
+Stati possibili: BUILDING → DEPLOYING → SUCCESS / CRASHED / FAILED
+
+Per i log live:
+  railway logs --service "api."
+
+Per vedere le variabili d'ambiente del servizio:
+  railway variables --service "api." --kv
+
+────────────────────────────────────────────────────────────────────────────────
+ 4.3  URL produzione
+────────────────────────────────────────────────────────────────────────────────
+
+WebApp:        https://api-production-e42a.up.railway.app/
+API health:    https://api-production-e42a.up.railway.app/health
+API login:     https://api-production-e42a.up.railway.app/api/auth/login (POST)
+
+────────────────────────────────────────────────────────────────────────────────
+ 4.4  Variabili d'ambiente già impostate su Railway
+────────────────────────────────────────────────────────────────────────────────
+
+DB_PROVIDER             = postgres
+DATABASE_URL            = ${{Postgres.DATABASE_URL}}    (reference al servizio)
+ASPNETCORE_ENVIRONMENT  = Production
+Jwt__Issuer             = OnCallendar
+Jwt__Audience           = OnCallendar.Mobile
+Jwt__SecretKey          = (random 48-char generato il 7 maggio 2026)
+Jwt__ExpiryMinutes      = 1440
+
+Per cambiare/aggiungere una variabile:
+  railway variables --service "api." --set "NOME=valore"
+
+
+================================================================================
+ 5. GIT — COMANDI BASE
+================================================================================
+
+PATH: C:\Users\Clore\Sviluppo\OnCallendar (qualsiasi sottocartella)
+
+  # Vedi cosa è cambiato
+  git status
+
+  # Vedi diff dettagliato
+  git diff
+
+  # Salva tutto (commit locale)
+  git add -A
+  git commit -m "descrizione"
+
+  # Pusha su GitHub
+  git push origin main
+
+  # Vedi ultimi 10 commit
+  git log --oneline -10
+
+  # Verifica se locale e remoto sono allineati
+  git fetch origin
+  git status -sb
+
+
+================================================================================
+ 6. BUILD E TYPECHECK MANUALI
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+ 6.1  Backend — verifica che compili
+────────────────────────────────────────────────────────────────────────────────
+
+PATH:    C:\Users\Clore\Sviluppo\OnCallendar\backend
+COMANDO: dotnet build OnCallendar.sln -c Release
+
+────────────────────────────────────────────────────────────────────────────────
+ 6.2  Mobile — typecheck TypeScript
+────────────────────────────────────────────────────────────────────────────────
+
+PATH:    C:\Users\Clore\Sviluppo\OnCallendar\mobile
+COMANDO: npx tsc --noEmit
+
+────────────────────────────────────────────────────────────────────────────────
+ 6.3  Web — build statica locale (per testare prima del deploy)
+────────────────────────────────────────────────────────────────────────────────
+
+PATH:    C:\Users\Clore\Sviluppo\OnCallendar\mobile
+COMANDO: npm run build:web
+
+Output:  C:\Users\Clore\Sviluppo\OnCallendar\web\dist\
+         (index.html + _expo/static/js/... + assets/...)
+
+
+================================================================================
+ 7. DATABASE LOCALE (LocalDB)
+================================================================================
+
+PATH:    qualsiasi
+COMANDI utili:
+
+  # Resettare il DB locale (ricrea da zero, NB: cancella tutto)
+  $env:ONCALLENDAR_RESET_DB="true"
+  cd backend; dotnet run --project src\OnCallendar.Api
+  # Una volta riavviato e seedato, ferma e rimuovi la variabile:
+  Remove-Item Env:ONCALLENDAR_RESET_DB
+
+  # Aggiungere una nuova migration (dopo aver cambiato un'entità)
+  cd backend\src\OnCallendar.Api
+  dotnet ef migrations add NomeDellaMigration `
+      --project ..\OnCallendar.Infrastructure `
+      --startup-project .
+
+  # Applicare le migrations al DB locale
+  cd backend\src\OnCallendar.Api
+  dotnet ef database update `
+      --project ..\OnCallendar.Infrastructure `
+      --startup-project .
+
+
+================================================================================
+ 8. TROUBLESHOOTING RAPIDO
+================================================================================
+
+PROBLEMA: "Network Error" da Expo Go
+  → Backend non avviato, oppure firewall blocca la porta 5000.
+    Vedi sezione 2.3.
+
+PROBLEMA: Web app su Railway è bianca
+  → Apri DevTools (F12) → Console. Solitamente è un asset 404.
+    Verifica i log Railway:
+      railway logs --service "api."
+
+PROBLEMA: dopo "git push origin main" Railway NON si è aggiornato
+  → Esatto, è voluto. Il deploy si fa SOLO con:
+      railway up --service "api." --ci --detach
+
+PROBLEMA: ho modificato un'entità e il backend crasha al boot su Railway
+  → Probabilmente ti manca una migration. In dev usa EnsureCreated/Migrate
+    locale; in prod (Railway/Postgres) il seeder usa EnsureCreated, quindi
+    cambiamenti dello schema richiedono o migrations Postgres-compatibili o
+    un reset del DB Postgres. Chiedimi.
+
+PROBLEMA: voglio loggare l'output di un comando Railway su file
+  → railway logs --service "api." > log.txt
+    Il comando NON termina da solo (è uno stream). Premi Ctrl+C dopo qualche
+    secondo per chiudere.
+
+
+================================================================================
+ 9. RAILWAY — COMANDI AVANZATI
+================================================================================
+
+Tutti da: C:\Users\Clore\Sviluppo\OnCallendar
+Sempre con: $env:RAILWAY_TOKEN="99d91753-d986-4800-b6ba-a4dd0e96ffa5"
+
+  # Lista deploy recenti
+  railway status --json | ConvertFrom-Json | ConvertTo-Json -Depth 6
+
+  # Domini configurati
+  railway domain --service "api."
+
+  # Generare un nuovo dominio (se serve)
+  railway domain --service "api." --port 8080
+
+  # Riavviare il servizio (senza redeploy)
+  railway redeploy --service "api." --yes
+
+  # Aprire la dashboard del progetto nel browser
+  railway open
+
+⚠️  SICUREZZA: il RAILWAY_TOKEN è scritto qui in chiaro per comodità.
+    Quando il setup è stabile, revocalo dalla dashboard Railway:
+      Project Settings → Tokens → Revoke
+
+================================================================================
+ FINE CHEAT SHEET
+================================================================================
