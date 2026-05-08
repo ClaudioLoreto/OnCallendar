@@ -19,6 +19,16 @@ using OnCallendar.Infrastructure.Persistence.Seed;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// In container la cartella wwwroot viene aggiunta DOPO il `dotnet publish`
+// (vedi Dockerfile: COPY --from=web /web/dist ./wwwroot/). Per assicurarsi
+// che ASP.NET la trovi al boot, dichiariamo esplicitamente il WebRoot.
+{
+    var contentRoot = builder.Environment.ContentRootPath;
+    var wwwrootDir = Path.Combine(contentRoot, "wwwroot");
+    Directory.CreateDirectory(wwwrootDir);
+    builder.Environment.WebRootPath = wwwrootDir;
+}
+
 // -------------------------------------------------------------------------
 // CRITICO PER TEST DA iPHONE (Expo Go) SULLA STESSA RETE Wi-Fi:
 // In ascolto su TUTTE le interfacce di rete della macchina Windows.
