@@ -220,7 +220,9 @@ app.MapGet("/_debug/wwwroot", () =>
 var indexHtml = Path.Combine(wwwroot, "index.html");
 if (File.Exists(indexHtml))
 {
-    app.MapFallback("{**path}", async ctx =>
+    // Constraint :nonfile esclude path con estensione (es. .js, .css) lasciandoli
+    // gestire dallo static-files middleware.
+    app.MapFallback("{*path:nonfile}", async ctx =>
     {
         var path = ctx.Request.Path.Value ?? string.Empty;
         if (path.StartsWith("/api", StringComparison.OrdinalIgnoreCase) ||
