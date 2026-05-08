@@ -16,6 +16,10 @@ public class Shift : BaseEntity, ITenantScoped, ISoftDeletable
     /// <summary>Data di inizio del turno (data del calendario, ora locale).</summary>
     public DateOnly Date { get; set; }
 
+    /// <summary>
+    /// Codice del turno (F/FN/P/PN/N). Persistito in DB come stringa
+    /// con FK alla tabella di lookup <c>ShiftTypes</c>.
+    /// </summary>
     public ShiftCode Code { get; set; }
 
     /// <summary>Inizio turno in UTC (calcolato a partire da Date + Code).</summary>

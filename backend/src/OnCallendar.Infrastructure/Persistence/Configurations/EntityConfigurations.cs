@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using OnCallendar.Domain.Entities;
+using OnCallendar.Domain.Entities.Lookup;
 using OnCallendar.Infrastructure.Persistence;
 
 namespace OnCallendar.Infrastructure.Persistence.Configurations;
@@ -35,6 +36,14 @@ public class ApplicationUserConfiguration : IEntityTypeConfiguration<Application
         b.Property(x => x.ThemePreference).HasMaxLength(16).HasDefaultValue("system");
         b.Property(x => x.Badge).HasMaxLength(16);
 
+        // Role: persistito come stringa (Code). Il FK constraint verso
+        // la tabella RoleTypes viene aggiunto a mano nella migration
+        // (EF non supporta FK con value converter sul tipo della colonna).
+        b.Property(x => x.Role)
+            .HasConversion<string>()
+            .HasMaxLength(40)
+            .IsRequired();
+
         b.HasOne(x => x.Tenant)
             .WithMany(t => t.Users)
             .HasForeignKey(x => x.TenantId)
@@ -56,8 +65,18 @@ public class ShiftConfiguration : IEntityTypeConfiguration<Shift>
         b.ToTable("Shifts");
         b.HasKey(x => x.Id);
         b.Property(x => x.Notes).HasMaxLength(1000);
-        b.Property(x => x.Status).HasConversion<int>();
-        b.Property(x => x.Code).HasConversion<int>();
+
+        // Code (ShiftCode) e Status (ShiftStatus): stringa. FK a ShiftTypes/
+        // ShiftStatuses aggiunti manualmente nella migration.
+        b.Property(x => x.Code)
+            .HasConversion<string>()
+            .HasMaxLength(8)
+            .IsRequired();
+
+        b.Property(x => x.Status)
+            .HasConversion<string>()
+            .HasMaxLength(20)
+            .IsRequired();
 
         b.HasOne(x => x.Tenant)
             .WithMany(t => t.Shifts)
@@ -86,8 +105,17 @@ public class SwapRequestConfiguration : IEntityTypeConfiguration<SwapRequest>
     {
         b.ToTable("SwapRequests");
         b.HasKey(x => x.Id);
-        b.Property(x => x.Type).HasConversion<int>();
-        b.Property(x => x.Status).HasConversion<int>();
+
+        b.Property(x => x.Type)
+            .HasConversion<string>()
+            .HasMaxLength(20)
+            .IsRequired();
+
+        b.Property(x => x.Status)
+            .HasConversion<string>()
+            .HasMaxLength(20)
+            .IsRequired();
+
         b.Property(x => x.Message).HasMaxLength(1000);
         b.Property(x => x.ResolutionReason).HasMaxLength(1000);
 

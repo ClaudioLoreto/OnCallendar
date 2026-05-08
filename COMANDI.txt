@@ -348,6 +348,42 @@ Variabili gia` settate sul servizio `api.`:
   Jwt__SecretKey          = (random 48-char)
   Jwt__ExpiryMinutes      = 1440
 
+Variabile TEMPORANEA per refactor schema (es. enum -> tabelle lookup):
+  ONCALLENDAR_RESET_DB    = true   -> al primo avvio fa DROP & CREATE del DB
+                                       e ri-seeda da zero. RIMUOVERLA subito
+                                       dopo il deploy, altrimenti ogni
+                                       restart cancella i dati.
+
+================================================================================
+ 6.bis MODELLO DATI - TABELLE LOOKUP
+================================================================================
+
+Tutti gli "enum" applicativi vivono in tabelle lookup (codice + descrizione)
+e sono referenziati via FK dalle tabelle principali:
+
+  RoleTypes              codici ruolo utente            FK <- AspNetUsers.Role
+    SuperAdmin           Super Amministratore
+    Medico               Medico
+
+  ShiftTypes             codici turno                   FK <- Shifts.Code
+    F   Festivo Diurno   (08-20)
+    FN  Festivo Notte    (20-08, overnight)
+    PF  Pre-Festivo      (20-08, overnight)
+    NF  Notte Feriale    (20-08, overnight)
+    R   Reperibilita`
+
+  ShiftStatuses          stati turno                    FK <- Shifts.Status
+    Planned / Confirmed / Swapped / Cancelled
+
+  SwapRequestTypes       tipo richiesta cambio          FK <- SwapRequests.Type
+    OneToOne / Open
+
+  SwapRequestStatuses    stato richiesta cambio         FK <- SwapRequests.Status
+    Pending / Accepted / Rejected / Cancelled / Expired
+
+Le righe sono popolate via EF `HasData` dalla migration `InitialPostgres`,
+i FK sono creati dalla migration `AddLookupForeignKeys`.
+
 
 ================================================================================
  7. APK ANDROID - BUILD CON EAS

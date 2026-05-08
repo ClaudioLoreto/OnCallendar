@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using OnCallendar.Application.Common.Interfaces;
 using OnCallendar.Domain.Entities;
+using OnCallendar.Domain.Entities.Lookup;
 
 namespace OnCallendar.Infrastructure.Persistence;
 
@@ -25,6 +26,13 @@ public class ApplicationDbContext
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<SwapCounterOffer> SwapCounterOffers => Set<SwapCounterOffer>();
+
+    // Tabelle di lookup (cataloghi codici/descrizioni).
+    public DbSet<RoleType> RoleTypes => Set<RoleType>();
+    public DbSet<ShiftType> ShiftTypes => Set<ShiftType>();
+    public DbSet<ShiftStatusType> ShiftStatuses => Set<ShiftStatusType>();
+    public DbSet<SwapRequestTypeLookup> SwapRequestTypes => Set<SwapRequestTypeLookup>();
+    public DbSet<SwapRequestStatusType> SwapRequestStatuses => Set<SwapRequestStatusType>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

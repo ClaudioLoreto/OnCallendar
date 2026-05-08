@@ -17,6 +17,10 @@ public class ApplicationUser : IdentityUser<Guid>, ISoftDeletable
     public Guid? TenantId { get; set; }
     public Tenant? Tenant { get; set; }
 
+    /// <summary>
+    /// Ruolo applicativo. Persistito in DB come stringa (Code) con FK
+    /// alla tabella di lookup <c>RoleTypes</c>.
+    /// </summary>
     public UserRole Role { get; set; } = UserRole.Medico;
 
     /// <summary>

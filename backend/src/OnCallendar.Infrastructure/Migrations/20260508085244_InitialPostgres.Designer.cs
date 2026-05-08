@@ -12,7 +12,7 @@ using OnCallendar.Infrastructure.Persistence;
 namespace OnCallendar.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260508083222_InitialPostgres")]
+    [Migration("20260508085244_InitialPostgres")]
     partial class InitialPostgres
     {
         /// <inheritdoc />
@@ -257,8 +257,10 @@ namespace OnCallendar.Infrastructure.Migrations
                         .HasColumnType("character varying(8)")
                         .HasDefaultValue("it");
 
-                    b.Property<int>("Role")
-                        .HasColumnType("integer");
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<string>("SecurityStamp")
                         .HasColumnType("text");
@@ -360,6 +362,215 @@ namespace OnCallendar.Infrastructure.Migrations
                     b.ToTable("AuditLogs", (string)null);
                 });
 
+            modelBuilder.Entity("OnCallendar.Domain.Entities.Lookup.RoleType", b =>
+                {
+                    b.Property<string>("Code")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Code");
+
+                    b.ToTable("RoleTypes", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Code = "SuperAdmin",
+                            Description = "Amministratore globale"
+                        },
+                        new
+                        {
+                            Code = "Medico",
+                            Description = "Medico di guardia"
+                        });
+                });
+
+            modelBuilder.Entity("OnCallendar.Domain.Entities.Lookup.ShiftStatusType", b =>
+                {
+                    b.Property<string>("Code")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Code");
+
+                    b.ToTable("ShiftStatuses", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Code = "Assigned",
+                            Description = "Assegnato"
+                        },
+                        new
+                        {
+                            Code = "OnBoard",
+                            Description = "Pubblicato in bacheca"
+                        },
+                        new
+                        {
+                            Code = "Completed",
+                            Description = "Completato"
+                        },
+                        new
+                        {
+                            Code = "Cancelled",
+                            Description = "Annullato"
+                        });
+                });
+
+            modelBuilder.Entity("OnCallendar.Domain.Entities.Lookup.ShiftType", b =>
+                {
+                    b.Property<string>("Code")
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("EndHourLocal")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsOvernight")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("StartHourLocal")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Code");
+
+                    b.ToTable("ShiftTypes", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Code = "F",
+                            Description = "Festivo Diurno",
+                            EndHourLocal = 20,
+                            IsOvernight = false,
+                            StartHourLocal = 8
+                        },
+                        new
+                        {
+                            Code = "FN",
+                            Description = "Festivo Notte",
+                            EndHourLocal = 8,
+                            IsOvernight = true,
+                            StartHourLocal = 20
+                        },
+                        new
+                        {
+                            Code = "P",
+                            Description = "Prefestivo Diurno",
+                            EndHourLocal = 20,
+                            IsOvernight = false,
+                            StartHourLocal = 10
+                        },
+                        new
+                        {
+                            Code = "PN",
+                            Description = "Prefestivo Notte",
+                            EndHourLocal = 8,
+                            IsOvernight = true,
+                            StartHourLocal = 20
+                        },
+                        new
+                        {
+                            Code = "N",
+                            Description = "Notte Infrasettimanale",
+                            EndHourLocal = 8,
+                            IsOvernight = true,
+                            StartHourLocal = 20
+                        });
+                });
+
+            modelBuilder.Entity("OnCallendar.Domain.Entities.Lookup.SwapRequestStatusType", b =>
+                {
+                    b.Property<string>("Code")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Code");
+
+                    b.ToTable("SwapRequestStatuses", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Code = "Pending",
+                            Description = "In attesa"
+                        },
+                        new
+                        {
+                            Code = "AutoApproved",
+                            Description = "Approvata automaticamente"
+                        },
+                        new
+                        {
+                            Code = "Rejected",
+                            Description = "Rifiutata"
+                        },
+                        new
+                        {
+                            Code = "Cancelled",
+                            Description = "Annullata"
+                        },
+                        new
+                        {
+                            Code = "BlockedByRules",
+                            Description = "Bloccata dalle regole"
+                        });
+                });
+
+            modelBuilder.Entity("OnCallendar.Domain.Entities.Lookup.SwapRequestTypeLookup", b =>
+                {
+                    b.Property<string>("Code")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Code");
+
+                    b.ToTable("SwapRequestTypes", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Code = "Giveaway",
+                            Description = "Cessione"
+                        },
+                        new
+                        {
+                            Code = "Swap",
+                            Description = "Scambio"
+                        },
+                        new
+                        {
+                            Code = "PickFromBoard",
+                            Description = "Presa dalla bacheca"
+                        });
+                });
+
             modelBuilder.Entity("OnCallendar.Domain.Entities.Notification", b =>
                 {
                     b.Property<Guid>("Id")
@@ -411,8 +622,10 @@ namespace OnCallendar.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<int>("Code")
-                        .HasColumnType("integer");
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -448,8 +661,10 @@ namespace OnCallendar.Infrastructure.Migrations
                     b.Property<DateTime>("StartUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<int>("Status")
-                        .HasColumnType("integer");
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
@@ -570,14 +785,18 @@ namespace OnCallendar.Infrastructure.Migrations
                     b.Property<DateTime?>("ResolvedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<int>("Status")
-                        .HasColumnType("integer");
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
 
-                    b.Property<int>("Type")
-                        .HasColumnType("integer");
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
 
                     b.Property<DateTime?>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
