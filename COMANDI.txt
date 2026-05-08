@@ -47,10 +47,16 @@ Admin:
   password: Admin#2026!
 
 Medici (login via email OPPURE badge, password = Medico#2026!):
-  M01  superboy23+claudia@gmail.com       Claudia Ioannucci
-  M02  superboy23+edoardo@gmail.com       Edoardo Luci
-  M03  superboy23+emanuele@gmail.com      Emanuele Dimarteu
-  M04  superboy23+alessandro@gmail.com    Alessandro Medico4
+  M01  superboy23+alessandro@gmail.com    Alessandro Alessandrini
+  M02  superboy23+emanuele@gmail.com      Emanuele Dimarteu
+  M03  superboy23+edoardo@gmail.com       Edoardo Luci
+  M04  superboy23+claudia@gmail.com       Claudia Ioannucci
+
+Mappatura numero -> medico (usata nei turni storici 2026):
+  1 = Alessandro Alessandrini
+  2 = Emanuele Dimarteu
+  3 = Edoardo Luci
+  4 = Claudia Ioannucci
 
 
 ================================================================================

@@ -25,13 +25,21 @@ public static class DbSeeder
 
     public const string NavelliTenantSlug = "navelli";
 
-    /// <summary>4 medici del calendario storico di Navelli. Badge = login rapido.</summary>
+    /// <summary>
+    /// 4 medici del calendario storico di Navelli. Badge = login rapido.
+    /// Mappatura corretta (verificata da utente, 8 maggio 2026):
+    ///   1 -> Alessandro Alessandrini
+    ///   2 -> Emanuele Dimarteu
+    ///   3 -> Edoardo Luci
+    ///   4 -> Claudia Ioannucci
+    /// I numeri 1..4 sono quelli usati nel JSON dei turni storici 2026.
+    /// </summary>
     public static readonly (int Number, string Badge, string Email, string Password, string First, string Last)[] Medici =
     {
-        (1, "M01", "superboy23+claudia@gmail.com",    "Medico#2026!", "Claudia",    "Ioannucci"),
-        (2, "M02", "superboy23+edoardo@gmail.com",    "Medico#2026!", "Edoardo",    "Luci"),
-        (3, "M03", "superboy23+emanuele@gmail.com",   "Medico#2026!", "Emanuele",   "Dimarteu"),
-        (4, "M04", "superboy23+alessandro@gmail.com", "Medico#2026!", "Alessandro", "Medico4"),
+        (1, "M01", "superboy23+alessandro@gmail.com", "Medico#2026!", "Alessandro", "Alessandrini"),
+        (2, "M02", "superboy23+emanuele@gmail.com",   "Medico#2026!", "Emanuele",   "Dimarteu"),
+        (3, "M03", "superboy23+edoardo@gmail.com",    "Medico#2026!", "Edoardo",    "Luci"),
+        (4, "M04", "superboy23+claudia@gmail.com",    "Medico#2026!", "Claudia",    "Ioannucci"),
     };
 
     public static async Task SeedAsync(
@@ -110,6 +118,7 @@ public static class DbSeeder
         }
 
         // 4 Medici di Navelli
+        // Step 1: crea quelli che non esistono ancora.
         foreach (var (number, badge, email, password, first, last) in Medici)
         {
             var user = await userManager.FindByEmailAsync(email);
@@ -124,8 +133,8 @@ public static class DbSeeder
                     LastName = last,
                     Role = UserRole.Medico,
                     TenantId = tenant.Id,
-                    MedicoNumber = number,
-                    Badge = badge,
+                    MedicoNumber = null, // assegnato in step 3 per evitare conflitti unique
+                    Badge = null,
                     IsActive = true,
                     CreatedAtUtc = DateTime.UtcNow,
                 };
@@ -136,14 +145,36 @@ public static class DbSeeder
                         string.Join("; ", res.Errors.Select(e => e.Description)));
                 await userManager.AddToRoleAsync(user, MedicoRole);
             }
-            else
-            {
-                var changed = false;
-                if (user.MedicoNumber != number) { user.MedicoNumber = number; changed = true; }
-                if (user.Badge != badge)         { user.Badge = badge;         changed = true; }
-                if (changed) await userManager.UpdateAsync(user);
-            }
         }
+
+        // Step 2: azzera Badge/MedicoNumber su TUTTI i 4 medici di Navelli per
+        // permettere uno swap (es. l'utente che era M01 deve diventare M04 e
+        // viceversa, senza violare il vincolo unique su Badge).
+        var emails = Medici.Select(m => m.Email).ToArray();
+        var existingMedici = await db.Users.IgnoreQueryFilters()
+            .Where(u => u.Email != null && emails.Contains(u.Email))
+            .ToListAsync(ct);
+        foreach (var u in existingMedici)
+        {
+            u.Badge = null;
+            u.MedicoNumber = null;
+        }
+        await db.SaveChangesAsync(ct);
+
+        // Step 3: applica la mappatura corretta (numero, badge, nome, cognome).
+        foreach (var (number, badge, email, _, first, last) in Medici)
+        {
+            var user = existingMedici.First(u =>
+                string.Equals(u.Email, email, StringComparison.OrdinalIgnoreCase));
+            user.MedicoNumber = number;
+            user.Badge = badge;
+            user.FirstName = first;
+            user.LastName = last;
+            user.Role = UserRole.Medico;
+            user.TenantId = tenant.Id;
+            user.IsActive = true;
+        }
+        await db.SaveChangesAsync(ct);
 
         await SeedShiftsAsync(db, tenant.Id, ct);
     }
