@@ -17,7 +17,7 @@
       "favicon": "./assets/icon.png"
     },
     "extra": {
-      "apiBaseUrl": "https://api-production-e42a.up.railway.app"
+      "apiBaseUrl": null
     }
   }
 }

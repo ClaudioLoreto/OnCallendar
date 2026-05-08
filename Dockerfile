@@ -1,11 +1,13 @@
 # syntax=docker/dockerfile:1
 # ---------- web (Expo SPA → static bundle) ----------
+# La WebApp riusa la codebase di `mobile/` via react-native-web.
+# Output finale: /web/dist (poi copiato in wwwroot/ del runtime .NET).
 FROM node:20-alpine AS web
-WORKDIR /web
-COPY mobile/package.json mobile/package-lock.json ./
-RUN npm ci --no-audit --no-fund
-COPY mobile/ ./
-RUN npx expo export -p web
+WORKDIR /work
+COPY mobile/package.json mobile/package-lock.json ./mobile/
+RUN cd mobile && npm ci --no-audit --no-fund
+COPY mobile/ ./mobile/
+RUN cd mobile && npx expo export -p web --output-dir ../web/dist
 
 # ---------- build .NET ----------
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
@@ -30,7 +32,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 COPY --from=build /app/publish ./
 # Web SPA copiata direttamente in wwwroot (servita da UseStaticFiles)
-COPY --from=web /web/dist ./wwwroot/
+COPY --from=web /work/web/dist ./wwwroot/
 
 # Railway inietta $PORT (di solito 8080); l'app legge env e usa quella
 ENV ASPNETCORE_URLS=http://0.0.0.0:8080

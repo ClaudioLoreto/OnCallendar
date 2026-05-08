@@ -33,17 +33,24 @@ function resolveBaseUrl(): string {
   const fromEnv = process.env.EXPO_PUBLIC_API_BASE_URL;
   if (fromEnv) return fromEnv;
 
-  // 2) Override da app.config (extra)
+  // 2) Su web la WebApp è servita dallo stesso dominio dell'API (Railway):
+  //    usiamo path relativo via window.location.origin → niente CORS, niente
+  //    URL hardcoded da aggiornare ad ogni cambio di dominio.
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+
+  // 3) Override da app.config (extra) – utile per APK release
   const fromExtra =
     (Constants.expoConfig?.extra as Record<string, string> | undefined)?.apiBaseUrl;
   if (fromExtra) return fromExtra;
 
-  // 3) Auto-detect via Metro bundler host (Expo Go)
+  // 4) Auto-detect via Metro bundler host (Expo Go in dev)
   //    hostUri es: "192.168.1.42:8081"
   const hostUri =
     Constants.expoConfig?.hostUri ??
-    // @ts-expect-error - manifest legacy fallback
-    Constants.manifest?.debuggerHost ??
+    // @ts-ignore - manifest legacy fallback per Expo SDK precedenti
+    (Constants as any).manifest?.debuggerHost ??
     '';
 
   const lanIp = hostUri.split(':')[0];
@@ -51,7 +58,7 @@ function resolveBaseUrl(): string {
     return `http://${lanIp}:${API_PORT}`;
   }
 
-  // 4) Fallback per simulatori
+  // 5) Fallback per simulatori
   if (Platform.OS === 'android') return `http://10.0.2.2:${API_PORT}`;
   return `http://localhost:${API_PORT}`;
 }
