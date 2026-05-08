@@ -185,8 +185,17 @@ if (app.Environment.IsDevelopment())
 // Static files per avatar caricati dagli utenti + SPA Web (Expo export → wwwroot/)
 var wwwroot = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
 Directory.CreateDirectory(Path.Combine(wwwroot, "uploads", "avatars"));
-app.UseDefaultFiles();   // serve index.html per "/"
-app.UseStaticFiles();
+var spaProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(wwwroot);
+app.UseDefaultFiles(new Microsoft.AspNetCore.Builder.DefaultFilesOptions
+{
+    FileProvider = spaProvider,
+    DefaultFileNames = new List<string> { "index.html" },
+});
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = spaProvider,
+    ServeUnknownFileTypes = true,
+});
 
 app.UseCors(DevCorsPolicy);
 app.UseAuthentication();
