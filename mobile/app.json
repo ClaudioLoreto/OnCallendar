@@ -9,15 +9,21 @@
     "splash": {
       "backgroundColor": "#F7F8F0"
     },
-    "ios": { "supportsTablet": true },
-    "android": { "package": "local.oncallendar" },
+    "ios": { "supportsTablet": true, "bundleIdentifier": "local.oncallendar" },
+    "android": {
+      "package": "local.oncallendar",
+      "versionCode": 1
+    },
     "web": {
       "bundler": "metro",
       "output": "single",
       "favicon": "./assets/icon.png"
     },
     "extra": {
-      "apiBaseUrl": null
+      "apiBaseUrl": null,
+      "eas": {
+        "projectId": ""
+      }
     }
   }
 }

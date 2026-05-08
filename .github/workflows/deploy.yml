@@ -1,0 +1,49 @@
+name: Deploy to Railway
+
+# CI/CD: ad ogni push sul branch main, Railway ricostruisce e ridistribuisce
+# il container partendo dal Dockerfile in root.
+#
+# Si può lanciare anche manualmente da:
+#   GitHub → Actions → "Deploy to Railway" → Run workflow
+#
+# REQUISITI:
+#   1. Su GitHub: Settings → Secrets and variables → Actions → "New repository secret"
+#      Name : RAILWAY_TOKEN
+#      Value: <Project Token generato da Railway dashboard>
+#   2. Il Project Token ha pieno accesso al progetto. Trattalo come una password.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'COMANDI.txt'
+      - 'README.md'
+      - '**/*.md'
+      - '.gitignore'
+      - '.github/**'
+  workflow_dispatch: {}
+
+concurrency:
+  group: railway-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build & deploy on Railway
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm i -g @railway/cli@latest
+
+      - name: Deploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::Secret RAILWAY_TOKEN non impostato. Crealo nei Settings del repo."
+            exit 1
+          fi
+          railway up --service "api." --ci --detach

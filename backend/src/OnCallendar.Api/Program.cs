@@ -60,20 +60,24 @@ builder.Services.AddCors(o => o.AddPolicy(DevCorsPolicy, p =>
      .AllowCredentials();
 }));
 
+// Default = postgres (sia in dev via Docker che in prod su Railway).
+// Per uso locale con SqlServer LocalDB impostare DB_PROVIDER=sqlserver.
+var dbProvider = (Environment.GetEnvironmentVariable("DB_PROVIDER")
+                  ?? builder.Configuration["Database:Provider"]
+                  ?? "postgres").Trim().ToLowerInvariant();
+DatabaseProviderHelper.Override(dbProvider);
+
 builder.Services.AddDbContext<ApplicationDbContext>(opt =>
 {
-    var provider = (Environment.GetEnvironmentVariable("DB_PROVIDER")
-                    ?? builder.Configuration["Database:Provider"]
-                    ?? "sqlserver").ToLowerInvariant();
-
-    if (provider == "postgres" || provider == "postgresql")
+    if (dbProvider is "postgres" or "postgresql")
     {
-        // Railway iniettà DATABASE_URL nel formato postgres://user:pass@host:port/db.
+        // Railway inietta DATABASE_URL come postgres://user:pass@host:port/db.
+        // In dev usiamo la ConnectionString "DefaultConnection" (formato Npgsql nativo).
         var raw = Environment.GetEnvironmentVariable("DATABASE_URL")
                   ?? builder.Configuration.GetConnectionString("DefaultConnection")
-                  ?? throw new InvalidOperationException("DATABASE_URL non impostato");
+                  ?? throw new InvalidOperationException("DATABASE_URL/DefaultConnection non impostato");
         var conn = DbConnectionStringHelper.NormalizeNpgsql(raw);
-        opt.UseNpgsql(conn);
+        opt.UseNpgsql(conn, npg => npg.MigrationsAssembly("OnCallendar.Infrastructure"));
     }
     else
     {

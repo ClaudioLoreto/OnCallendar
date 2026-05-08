@@ -1,0 +1,23 @@
+services:
+  # Postgres locale per DEV. NIENTE a che vedere con il DB di Railway.
+  # I dati persistono nel volume `pgdata` finché non lo cancelli.
+  postgres:
+    image: postgres:16-alpine
+    container_name: oncallendar-pg-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: oncallendar
+      POSTGRES_PASSWORD: dev_only_password
+      POSTGRES_DB: oncallendar_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oncallendar -d oncallendar_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

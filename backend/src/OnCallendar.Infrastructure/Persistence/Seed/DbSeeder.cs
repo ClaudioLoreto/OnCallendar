@@ -46,13 +46,15 @@ public static class DbSeeder
             await db.Database.EnsureDeletedAsync(ct);
         }
 
-        // Le migrations attuali sono SqlServer-specific (nvarchar/datetime2).
-        // Su Postgres (Railway) usiamo EnsureCreated, che genera lo schema dal modello
-        // attraverso il provider corrente.
+        // Schema management:
+        //  • SqlServer (LocalDB / dev legacy): MigrateAsync con migrations classiche.
+        //  • Postgres: MigrateAsync con baseline automatico se il DB era stato
+        //    creato in passato con EnsureCreated (prod Railway pre-migrations).
         var providerName = db.Database.ProviderName ?? string.Empty;
         if (providerName.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
         {
-            await db.Database.EnsureCreatedAsync(ct);
+            await BaselinePostgresIfLegacyAsync(db, ct);
+            await db.Database.MigrateAsync(ct);
         }
         else
         {
@@ -274,5 +276,68 @@ public static class DbSeeder
             try { return TimeZoneInfo.FindSystemTimeZoneById("W. Europe Standard Time"); }
             catch { return TimeZoneInfo.Utc; }
         }
+    }
+
+    /// <summary>
+    /// Se il DB Postgres contiene già le tabelle applicative (creato in passato
+    /// con EnsureCreated, prima dell'introduzione delle migrations) ma manca
+    /// __EFMigrationsHistory, popola la storia segnando come "applicate" tutte
+    /// le migrations correnti. NON modifica i dati. Idempotente.
+    /// </summary>
+    private static async Task BaselinePostgresIfLegacyAsync(ApplicationDbContext db, CancellationToken ct)
+    {
+        var conn = db.Database.GetDbConnection();
+        var wasOpen = conn.State == System.Data.ConnectionState.Open;
+        if (!wasOpen) await conn.OpenAsync(ct);
+
+        try
+        {
+            if (await TableExistsAsync(conn, "__EFMigrationsHistory", ct))
+                return; // Già gestito da migrations classiche.
+
+            // Tabella sentinella: se non c'è, il DB è vuoto e MigrateAsync creerà tutto.
+            if (!await TableExistsAsync(conn, "AspNetUsers", ct))
+                return;
+
+            // Legacy DB con dati reali → baseline non distruttivo.
+            await using (var create = conn.CreateCommand())
+            {
+                create.CommandText = @"
+CREATE TABLE IF NOT EXISTS ""__EFMigrationsHistory"" (
+    ""MigrationId"" character varying(150) NOT NULL,
+    ""ProductVersion"" character varying(32) NOT NULL,
+    CONSTRAINT ""PK___EFMigrationsHistory"" PRIMARY KEY (""MigrationId"")
+);";
+                await create.ExecuteNonQueryAsync(ct);
+            }
+
+            var migrations = db.Database.GetMigrations().ToList();
+            const string productVersion = "8.0.10";
+            foreach (var migId in migrations)
+            {
+                await using var ins = conn.CreateCommand();
+                ins.CommandText =
+                    @"INSERT INTO ""__EFMigrationsHistory"" (""MigrationId"", ""ProductVersion"")
+                      VALUES (@m, @v) ON CONFLICT DO NOTHING";
+                var pm = ins.CreateParameter(); pm.ParameterName = "@m"; pm.Value = migId; ins.Parameters.Add(pm);
+                var pv = ins.CreateParameter(); pv.ParameterName = "@v"; pv.Value = productVersion; ins.Parameters.Add(pv);
+                await ins.ExecuteNonQueryAsync(ct);
+            }
+        }
+        finally
+        {
+            if (!wasOpen) await conn.CloseAsync();
+        }
+    }
+
+    private static async Task<bool> TableExistsAsync(System.Data.Common.DbConnection conn, string tableName, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"SELECT EXISTS (
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = @t)";
+        var p = cmd.CreateParameter(); p.ParameterName = "@t"; p.Value = tableName; cmd.Parameters.Add(p);
+        var result = await cmd.ExecuteScalarAsync(ct);
+        return result is bool b && b;
     }
 }
