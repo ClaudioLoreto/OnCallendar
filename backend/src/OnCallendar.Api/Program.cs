@@ -185,6 +185,17 @@ app.MapControllers();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", time = DateTime.UtcNow }));
 
+app.MapGet("/_debug/wwwroot", () =>
+{
+    if (!Directory.Exists(wwwroot)) return Results.Ok(new { exists = false, wwwroot });
+    var files = Directory.GetFiles(wwwroot, "*", SearchOption.AllDirectories)
+        .Select(f => f.Substring(wwwroot.Length).Replace('\\', '/'))
+        .OrderBy(f => f)
+        .Take(50)
+        .ToArray();
+    return Results.Ok(new { wwwroot, count = Directory.GetFiles(wwwroot, "*", SearchOption.AllDirectories).Length, sample = files });
+});
+
 // SPA fallback: per qualsiasi rotta del client (non /api, /swagger, /uploads, /health)
 // rimanda a index.html così il client routing funziona anche su refresh.
 var indexHtml = Path.Combine(wwwroot, "index.html");
