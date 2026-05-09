@@ -93,6 +93,11 @@ public class ShiftConfiguration : IEntityTypeConfiguration<Shift>
             .HasForeignKey(x => x.MedicoReperibileId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        b.HasOne(x => x.ExternalDoctor)
+            .WithMany()
+            .HasForeignKey(x => x.ExternalDoctorId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         b.HasIndex(x => new { x.TenantId, x.Date });
         b.HasIndex(x => new { x.TenantId, x.StartUtc });
         b.HasIndex(x => new { x.TenantId, x.MedicoTurnoId });
@@ -156,5 +161,31 @@ public class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         b.Property(x => x.OldValuesJson);
         b.Property(x => x.NewValuesJson);
         b.HasIndex(x => new { x.TenantId, x.EntityType, x.EntityId });
+    }
+}
+
+public class ExternalDoctorConfiguration : IEntityTypeConfiguration<ExternalDoctor>
+{
+    public void Configure(EntityTypeBuilder<ExternalDoctor> b)
+    {
+        b.ToTable("ExternalDoctors");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.FirstName).IsRequired().HasMaxLength(80);
+        b.Property(x => x.LastName).IsRequired().HasMaxLength(80);
+        b.Property(x => x.NormalizedKey).IsRequired().HasMaxLength(170);
+        b.Property(x => x.Phone).HasMaxLength(40);
+        b.Property(x => x.Notes).HasMaxLength(500);
+        b.Ignore(x => x.FullName);
+
+        b.HasOne(x => x.Tenant)
+            .WithMany()
+            .HasForeignKey(x => x.TenantId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // Una stessa persona (tenant + nome+cognome normalizzati) viene censita
+        // una sola volta e poi riproposta come suggerimento per gli utilizzi
+        // successivi.
+        b.HasIndex(x => new { x.TenantId, x.NormalizedKey }).IsUnique();
+        b.HasIndex(x => new { x.TenantId, x.LastName });
     }
 }

@@ -35,6 +35,15 @@ public class Shift : BaseEntity, ITenantScoped, ISoftDeletable
     public Guid? MedicoReperibileId { get; set; }
     public ApplicationUser? MedicoReperibile { get; set; }
 
+    /// <summary>
+    /// Medico ESTERNO che copre questo turno (al posto del titolare).
+    /// Quando valorizzato, il turno è formalmente eseguito da una persona
+    /// non censita tra gli utenti dell'app. <see cref="MedicoTurnoId"/>
+    /// resta valorizzato per ricordare chi ha ceduto il turno.
+    /// </summary>
+    public Guid? ExternalDoctorId { get; set; }
+    public ExternalDoctor? ExternalDoctor { get; set; }
+
     public ShiftStatus Status { get; set; } = ShiftStatus.Assigned;
 
     public string? Notes { get; set; }

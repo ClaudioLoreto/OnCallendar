@@ -33,6 +33,7 @@ public sealed class BoardController : ControllerBase
         var items = await _db.Shifts
             .Include(s => s.MedicoTurno)
             .Include(s => s.MedicoReperibile)
+            .Include(s => s.ExternalDoctor)
             .Where(s => s.Status == ShiftStatus.OnBoard && s.StartUtc > nowUtc)
             .OrderBy(s => s.StartUtc)
             .ToListAsync();

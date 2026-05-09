@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import { Avatar, Badge, Button, Card, EmptyState, Icon, Sheet } from '../components/ui';
 import AppHeader from '../components/AppHeader';
+import AssignExternalSheet from '../components/AssignExternalSheet';
 import {
   CalendarApi, DayDto, ShiftDto, ShiftStatus, ShiftsApi,
   shiftCodeIcon, shiftCodeShort, shiftCodeTone,
@@ -24,6 +25,7 @@ export default function CalendarScreen({ navigation }: Props) {
 
   // Sheet azioni sul mio turno
   const [actionShift, setActionShift] = useState<ShiftDto | null>(null);
+  const [externalShift, setExternalShift] = useState<ShiftDto | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -145,6 +147,22 @@ export default function CalendarScreen({ navigation }: Props) {
           </View>
         ) : null}
 
+        {/* Medico esterno (copre il turno) */}
+        {s.externalDoctor ? (
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6,
+            backgroundColor: theme.colors.surfaceAlt,
+            borderRadius: theme.radius.s,
+            paddingVertical: 6, paddingHorizontal: 8,
+          }}>
+            <Icon name="person-add-outline" size={16} color={theme.colors.warning} />
+            <Text style={[theme.typography.caption, { flex: 1, fontWeight: '700' }]}>
+              Coperto da: {s.externalDoctor.fullName}
+            </Text>
+            <Badge label="Esterno" tone="warning" />
+          </View>
+        ) : null}
+
         {s.isMineTurno && !s.isPast ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 }}>
             <Icon name="ellipsis-horizontal" size={14} color={theme.colors.textMuted} />
@@ -230,10 +248,33 @@ export default function CalendarScreen({ navigation }: Props) {
                 variant="secondary"
                 onPress={() => goToWizard('scambio')}
               />
+              <Button
+                title={actionShift?.externalDoctor ? 'Gestisci medico esterno' : 'Affida a medico esterno'}
+                icon="person-add-outline"
+                variant="secondary"
+                onPress={() => {
+                  const s = actionShift;
+                  setActionShift(null);
+                  setExternalShift(s);
+                }}
+              />
             </View>
           </ScrollView>
         ) : null}
       </Sheet>
+
+      {/* Sheet assegnazione medico esterno */}
+      <AssignExternalSheet
+        shift={externalShift}
+        onClose={() => setExternalShift(null)}
+        onUpdated={(updated) => {
+          // Aggiorno il turno nella lista in memoria
+          setDays(prev => prev.map(d => ({
+            ...d,
+            shifts: d.shifts.map(x => x.id === updated.id ? updated : x),
+          })));
+        }}
+      />
     </SafeAreaView>
   );
 }

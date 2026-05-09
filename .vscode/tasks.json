@@ -1,0 +1,90 @@
+{
+  // OnCallendar - Task in PARALLELO per i workflow di sviluppo.
+  // Ogni voce gira in un terminale dedicato e isolato. NIENTE modifiche al
+  // firewall di Windows o alla categoria della rete: rimangono come l'utente
+  // li ha impostati.
+  //
+  // Scelta del task Expo:
+  //   * "Dev: Expo (stessa rete - LAN)"  -> PC e telefono sulla stessa Wi-Fi.
+  //                                         Richiede che Windows abbia
+  //                                         autorizzato Node sulla rete
+  //                                         "Privata" (popup standard di
+  //                                         Windows alla prima esecuzione).
+  //   * "Dev: Expo (reti diverse - Tunnel)" -> PC e telefono su reti diverse,
+  //                                            o quando il firewall blocca la
+  //                                            LAN. Passa per ngrok di Expo,
+  //                                            sicuro, niente firewall da
+  //                                            toccare. Piu' lento.
+  //
+  // Backend e Postgres dev sono task separati. Si avviano una volta e
+  // restano su finche' non li fermi tu.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Dev: Postgres up (Docker)",
+      "type": "shell",
+      "command": "docker compose up -d postgres",
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": { "reveal": "always", "panel": "dedicated", "group": "dev" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Dev: Postgres down (Docker)",
+      "type": "shell",
+      "command": "docker compose down",
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": { "reveal": "always", "panel": "dedicated", "group": "dev" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Dev: Backend (.NET su :5000, Postgres locale)",
+      "type": "shell",
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project", "src/OnCallendar.Api/OnCallendar.Api.csproj",
+        "--no-launch-profile"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/backend",
+        "env": {
+          "ASPNETCORE_ENVIRONMENT": "Development",
+          "DB_PROVIDER": "postgres"
+        }
+      },
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated", "group": "dev" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Dev: Expo (stessa rete - LAN)",
+      "type": "shell",
+      "command": "npx",
+      "args": ["expo", "start", "--lan"],
+      "options": { "cwd": "${workspaceFolder}/mobile" },
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated", "group": "expo" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Dev: Expo (reti diverse - Tunnel)",
+      "type": "shell",
+      "command": "npx",
+      "args": ["expo", "start", "--tunnel"],
+      "options": { "cwd": "${workspaceFolder}/mobile" },
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated", "group": "expo" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Dev: Expo Web (browser)",
+      "type": "shell",
+      "command": "npx",
+      "args": ["expo", "start", "--web"],
+      "options": { "cwd": "${workspaceFolder}/mobile" },
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated", "group": "expo" },
+      "problemMatcher": []
+    }
+  ]
+}

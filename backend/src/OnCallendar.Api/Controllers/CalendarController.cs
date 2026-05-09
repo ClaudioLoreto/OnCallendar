@@ -43,6 +43,7 @@ public sealed class CalendarController : ControllerBase
         var shifts = await _db.Shifts
             .Include(s => s.MedicoTurno)
             .Include(s => s.MedicoReperibile)
+            .Include(s => s.ExternalDoctor)
             .Where(s => s.Date >= fromDate && s.Date <= toDate)
             .OrderBy(s => s.Date).ThenBy(s => s.StartUtc)
             .ToListAsync();

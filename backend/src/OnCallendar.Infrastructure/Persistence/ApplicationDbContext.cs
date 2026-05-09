@@ -26,6 +26,7 @@ public class ApplicationDbContext
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<SwapCounterOffer> SwapCounterOffers => Set<SwapCounterOffer>();
+    public DbSet<ExternalDoctor> ExternalDoctors => Set<ExternalDoctor>();
 
     // Tabelle di lookup (cataloghi codici/descrizioni).
     public DbSet<RoleType> RoleTypes => Set<RoleType>();
@@ -63,6 +64,9 @@ public class ApplicationDbContext
 
         builder.Entity<SwapCounterOffer>().HasQueryFilter(o =>
             currentTenantId == null || o.TenantId == currentTenantId);
+
+        builder.Entity<ExternalDoctor>().HasQueryFilter(e =>
+            currentTenantId == null || e.TenantId == currentTenantId);
 
         // Su Postgres, rimuovi tutti i filtri SqlServer-style ("[Col] IS NOT NULL")
         // ereditati da ASP.NET Identity e da EF: Postgres tratta NULL come distinti,

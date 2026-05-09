@@ -29,6 +29,13 @@ export type MedicoRefDto = {
   number: number | null;
 };
 
+export type ExternalDoctorRefDto = {
+  id: string;
+  fullName: string;
+  firstName: string;
+  lastName: string;
+};
+
 export type ShiftDto = {
   id: string;
   date: string;          // yyyy-MM-dd
@@ -41,6 +48,7 @@ export type ShiftDto = {
   status: ShiftStatusValue;
   medicoTurno: MedicoRefDto | null;
   medicoReperibile: MedicoRefDto | null;
+  externalDoctor: ExternalDoctorRefDto | null;
   isMineTurno: boolean;
   isMineReperibile: boolean;
   isPast: boolean;
@@ -153,6 +161,25 @@ export const ShiftsApi = {
   all:  () => apiClient.get<ShiftDto[]>('/api/shifts').then(r => r.data),
   publish:   (id: string) => apiClient.post(`/api/shifts/${id}/publish-on-board`),
   unpublish: (id: string) => apiClient.post(`/api/shifts/${id}/unpublish`),
+  assignExternal: (id: string, firstName: string, lastName: string, phone?: string) =>
+    apiClient.post<ShiftDto>(`/api/shifts/${id}/assign-external`, { firstName, lastName, phone })
+      .then(r => r.data),
+  clearExternal: (id: string) =>
+    apiClient.post<ShiftDto>(`/api/shifts/${id}/clear-external`).then(r => r.data),
+};
+
+export type ExternalDoctorDto = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  phone: string | null;
+};
+
+export const ExternalDoctorsApi = {
+  search: (q: string) =>
+    apiClient.get<ExternalDoctorDto[]>('/api/external-doctors/search', { params: { q } })
+      .then(r => r.data),
 };
 
 export const CalendarApi = {
