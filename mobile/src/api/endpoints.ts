@@ -182,11 +182,16 @@ export const ExternalDoctorsApi = {
       .then(r => r.data),
 };
 
+// Formatta una Date come yyyy-MM-dd nel fuso LOCALE (non UTC),
+// così "oggi" in Europe/Rome non diventa "ieri" lato server.
+const toLocalYmd = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
 export const CalendarApi = {
   list: (from?: Date, to?: Date) => apiClient.get<DayDto[]>('/api/calendar', {
     params: {
-      from: from ? from.toISOString().slice(0, 10) : undefined,
-      to:   to   ? to.toISOString().slice(0, 10)   : undefined,
+      from: from ? toLocalYmd(from) : undefined,
+      to:   to   ? toLocalYmd(to)   : undefined,
     },
   }).then(r => r.data),
 };
