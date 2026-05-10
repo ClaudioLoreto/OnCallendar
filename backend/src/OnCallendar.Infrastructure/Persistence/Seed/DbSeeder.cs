@@ -29,7 +29,7 @@ public static class DbSeeder
     /// 4 medici del calendario storico di Navelli. Badge = login rapido.
     /// Mappatura corretta (verificata da utente, 8 maggio 2026):
     ///   1 -> Alessandro Marturano
-    ///   2 -> Emanuele Dimarteu
+    ///   2 -> Emanuele Du Marteau
     ///   3 -> Edoardo Luci
     ///   4 -> Claudia Ioannucci
     /// I numeri 1..4 sono quelli usati nel JSON dei turni storici 2026.
@@ -37,7 +37,7 @@ public static class DbSeeder
     public static readonly (int Number, string Badge, string Email, string Password, string First, string Last)[] Medici =
     {
         (1, "M01", "superboy23+alessandro@gmail.com", "Medico#2026!", "Alessandro", "Marturano"),
-        (2, "M02", "superboy23+emanuele@gmail.com",   "Medico#2026!", "Emanuele",   "Dimarteu"),
+        (2, "M02", "superboy23+emanuele@gmail.com",   "Medico#2026!", "Emanuele",   "Du Marteau"),
         (3, "M03", "superboy23+edoardo@gmail.com",    "Medico#2026!", "Edoardo",    "Luci"),
         (4, "M04", "superboy23+claudia@gmail.com",    "Medico#2026!", "Claudia",    "Ioannucci"),
     };
