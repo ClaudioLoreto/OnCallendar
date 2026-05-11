@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { useI18n } from '../i18n/I18nContext';
+import { UsersApi } from '../api/endpoints';
 
 import LoginScreen from '../screens/LoginScreen';
 import CalendarScreen from '../screens/CalendarScreen';
@@ -15,6 +16,8 @@ import SwapsScreen from '../screens/SwapsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import HistoryScreen from '../screens/HistoryScreen';
 import NotificationsScreen from '../screens/NotificationsScreen';
+import NotificationPreferencesScreen from '../screens/NotificationPreferencesScreen';
+import PasswordExpiredScreen from '../screens/PasswordExpiredScreen';
 
 const Tabs = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -51,7 +54,21 @@ const RootNavigator: React.FC = () => {
   const { theme, scheme } = useTheme();
   const { t } = useI18n();
 
-  if (loading) {
+  // Carica i flag account (passwordExpired, ecc.) ogni volta che cambia user.
+  // Se passwordExpired è true mostriamo solo la schermata bloccante.
+  const [passwordExpired, setPasswordExpired] = useState<boolean | null>(null);
+  const refreshFlags = useCallback(async () => {
+    if (!user) { setPasswordExpired(null); return; }
+    try {
+      const me = await UsersApi.me();
+      setPasswordExpired(!!me.passwordExpired);
+    } catch {
+      setPasswordExpired(false); // se non riusciamo a leggerlo, non blocchiamo
+    }
+  }, [user]);
+  useEffect(() => { refreshFlags(); }, [refreshFlags]);
+
+  if (loading || (user && passwordExpired === null)) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.background }}>
         <ActivityIndicator color={theme.colors.primary} size="large" />
@@ -74,6 +91,13 @@ const RootNavigator: React.FC = () => {
   return (
     <NavigationContainer theme={navTheme}>
       {user ? (
+        passwordExpired ? (
+          <Stack.Navigator screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="PasswordExpired">
+              {() => <PasswordExpiredScreen onPasswordChanged={refreshFlags} />}
+            </Stack.Screen>
+          </Stack.Navigator>
+        ) : (
         <Stack.Navigator
           screenOptions={{
             headerStyle: { backgroundColor: theme.colors.surface },
@@ -87,7 +111,9 @@ const RootNavigator: React.FC = () => {
           <Stack.Screen name="Profile"       component={ProfileScreen}      options={{ title: t('profile.title') }} />
           <Stack.Screen name="History"       component={HistoryScreen}      options={{ title: t('profile.section.history') }} />
           <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifiche' }} />
+          <Stack.Screen name="NotificationPreferences" component={NotificationPreferencesScreen} options={{ title: t('notifPrefs.title') }} />
         </Stack.Navigator>
+        )
       ) : (
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Login" component={LoginScreen} />

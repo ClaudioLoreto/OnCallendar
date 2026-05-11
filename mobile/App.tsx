@@ -7,6 +7,7 @@ import { NotificationsProvider } from './src/auth/NotificationsContext';
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { I18nProvider } from './src/i18n/I18nContext';
 import RootNavigator from './src/navigation/RootNavigator';
+import { DeepLinkRouter } from './src/navigation/DeepLinkRouter';
 
 const ThemedStatusBar: React.FC = () => {
   const { scheme } = useTheme();
@@ -21,7 +22,9 @@ export default function App() {
           <AuthProvider>
             <NotificationsProvider>
               <ThemedStatusBar />
-              <RootNavigator />
+              <DeepLinkRouter>
+                <RootNavigator />
+              </DeepLinkRouter>
             </NotificationsProvider>
           </AuthProvider>
         </I18nProvider>

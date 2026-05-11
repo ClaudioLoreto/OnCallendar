@@ -1,16 +1,30 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Alert, SafeAreaView, ScrollView, Text, TouchableOpacity, View,
+  ActivityIndicator, SafeAreaView, ScrollView, Text, TouchableOpacity, View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { Avatar, Badge, Button, Card, Field, Icon, ReadValue, SegmentedControl } from '../components/ui';
-import { UsersApi, MeDto, AuthApi } from '../api/endpoints';
+import {
+  Avatar, Badge, Button, Card, ConfirmModal, Field, Icon, PasswordField, ReadValue, SegmentedControl,
+} from '../components/ui';
+import { UsersApi, MeDto } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { useI18n, Locale } from '../i18n/I18nContext';
 import { ThemePreference } from '../theme/ThemeContext';
+import { buildCallbackUrl } from '../api/callbackUrl';
+import { PasswordRules, isPasswordStrong } from './ResetPasswordScreen';
 
 type Props = { navigation: { goBack: () => void; navigate: (r: string) => void } };
+
+type Popup = {
+  title: string;
+  message?: string;
+  tone?: 'default' | 'success' | 'warning' | 'danger';
+  icon?: any;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  onConfirm?: () => void;
+};
 
 export default function ProfileScreen({ navigation }: Props) {
   const { theme, preference, setPreference } = useTheme();
@@ -26,6 +40,17 @@ export default function ProfileScreen({ navigation }: Props) {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Password change inline (dentro l'edit anagrafica)
+  const [curPwd, setCurPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [newPwd2, setNewPwd2] = useState('');
+  const [pwdOpen, setPwdOpen] = useState(false);
+
+  const [popup, setPopup] = useState<Popup | null>(null);
+
+  const newPwdStrong = useMemo(() => (newPwd.length === 0 ? true : isPasswordStrong(newPwd)), [newPwd]);
+  const wantsPwdChange = pwdOpen && (curPwd.length > 0 || newPwd.length > 0 || newPwd2.length > 0);
 
   const loadMe = async () => {
     try {
@@ -53,15 +78,57 @@ export default function ProfileScreen({ navigation }: Props) {
     setLastName(me.lastName);
     setEmail(me.email);
     setPhone(me.phone ?? '');
+    setCurPwd(''); setNewPwd(''); setNewPwd2('');
+    setPwdOpen(false);
     setEditing(false);
     setError(null);
   };
 
   const save = async () => {
+    // Validazione cambio password (se compilato)
+    if (wantsPwdChange) {
+      if (!curPwd) { setPopup({ title: 'Password attuale richiesta', message: 'Per cambiare la password devi inserire quella attuale.', tone: 'warning', icon: 'alert-circle-outline' }); return; }
+      if (!isPasswordStrong(newPwd)) { setPopup({ title: 'Nuova password troppo debole', message: 'Verifica i requisiti elencati sotto la nuova password.', tone: 'warning', icon: 'shield-half-outline' }); return; }
+      if (newPwd !== newPwd2) { setPopup({ title: 'Le password non coincidono', tone: 'warning', icon: 'alert-circle-outline' }); return; }
+    }
+
     setSaving(true); setError(null);
     try {
-      const updated = await UsersApi.updateMe({ firstName, lastName, email, phone });
+      const emailChanged = !!me && email.trim().toLowerCase() !== me.email.toLowerCase();
+      const updated = await UsersApi.updateMe({ firstName, lastName, phone });
       setMe(updated);
+
+      // Cambio password
+      if (wantsPwdChange) {
+        try {
+          await UsersApi.changePassword(curPwd, newPwd);
+          setCurPwd(''); setNewPwd(''); setNewPwd2('');
+          // ricarica me per refresh dei flag passwordChangedAtUtc / passwordChangeRequired / passwordExpired
+          await loadMe();
+          setPopup({ title: 'Password aggiornata', message: 'La tua nuova password è ora attiva.', tone: 'success', icon: 'shield-checkmark-outline' });
+        } catch (e: any) {
+          const msg = e?.response?.data?.errors?.join(' ') ?? e?.response?.data?.error ?? 'Cambio password non riuscito.';
+          setPopup({ title: 'Cambio password fallito', message: msg, tone: 'danger', icon: 'alert-circle-outline' });
+          setSaving(false);
+          return;
+        }
+      }
+
+      // Cambio email (richiede conferma via link)
+      if (emailChanged) {
+        try {
+          const r = await UsersApi.requestEmailChange(email.trim(), buildCallbackUrl('confirm-email'));
+          setMe(prev => prev ? { ...prev, pendingEmail: r.pendingEmail } : prev);
+          setPopup({
+            title: 'Conferma email inviata',
+            message: `Ti abbiamo inviato un link a ${r.pendingEmail}. Apri quella casella e clicca il pulsante per attivare il nuovo indirizzo.`,
+            tone: 'success',
+            icon: 'mail-outline',
+          });
+        } catch (e: any) {
+          setPopup({ title: 'Errore cambio email', message: e?.response?.data?.error ?? 'Impossibile avviare la richiesta.', tone: 'danger', icon: 'alert-circle-outline' });
+        }
+      }
       setEditing(false);
     } catch (e: any) {
       setError(e?.response?.data?.error ?? e?.message ?? 'Errore');
@@ -73,7 +140,7 @@ export default function ProfileScreen({ navigation }: Props) {
   const pickAvatar = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Permessi', 'Serve l\'accesso alla galleria per cambiare l\'avatar.');
+      setPopup({ title: 'Permessi negati', message: "Serve l'accesso alla galleria per cambiare l'avatar.", tone: 'warning', icon: 'image-outline' });
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -94,17 +161,25 @@ export default function ProfileScreen({ navigation }: Props) {
     }
   };
 
-  const requestEmailVerification = async () => {
-    try {
-      await AuthApi.forgotPassword(me?.email ?? '');
-      Alert.alert('OK', 'Email di verifica inviata (se attiva).');
-    } catch {
-      Alert.alert(t('common.notImplemented'), 'Verifica email in arrivo.');
-    }
-  };
+  const onLogout = async () => { await logout(); };
 
-  const onLogout = async () => {
-    await logout();
+  const onDevExpire = () => {
+    setPopup({
+      title: 'DEV: simula scadenza password',
+      message: 'Imposto la mia data ultimo cambio password a 366 giorni fa, poi ti faccio uscire. Al prossimo login l\'app mostrer\u00e0 la schermata bloccante di reset password.',
+      tone: 'danger',
+      icon: 'bug-outline',
+      confirmLabel: 'Conferma',
+      cancelLabel: 'Annulla',
+      onConfirm: async () => {
+        try {
+          await UsersApi.devExpirePassword();
+          await logout();
+        } catch (e: any) {
+          setPopup({ title: 'Errore', message: e?.response?.data?.error ?? 'Operazione non riuscita.', tone: 'danger', icon: 'alert-circle-outline' });
+        }
+      },
+    });
   };
 
   if (!me) {
@@ -142,7 +217,7 @@ export default function ProfileScreen({ navigation }: Props) {
           <Text style={theme.typography.caption}>{me.email}</Text>
         </View>
 
-        {/* Anagrafica */}
+        {/* Anagrafica + (in edit) cambio password */}
         <Card>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: theme.spacing.m }}>
             <Text style={theme.typography.h3}>{t('profile.section.personal')}</Text>
@@ -159,12 +234,10 @@ export default function ProfileScreen({ navigation }: Props) {
               <ReadValue label={t('profile.lastName')} value={me.lastName} icon="person-outline" />
               <ReadValue label={t('profile.email')} value={me.email} icon="mail-outline" />
               <ReadValue label={t('profile.phone')} value={me.phone} icon="call-outline" />
+              <ReadValue label="Password" value="••••••••" icon="lock-closed-outline" />
               {!me.emailConfirmed ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
                   <Badge label={t('profile.unverified.email')} tone="warning" />
-                  <TouchableOpacity onPress={requestEmailVerification}>
-                    <Text style={{ color: theme.colors.primary, fontWeight: '600' }}>{t('profile.verify')}</Text>
-                  </TouchableOpacity>
                 </View>
               ) : null}
             </>
@@ -182,6 +255,40 @@ export default function ProfileScreen({ navigation }: Props) {
                 value={phone} onChangeText={setPhone}
                 keyboardType="phone-pad"
               />
+
+              {/* CAMBIO PASSWORD: campo mascherato + matita per aprire la tendina */}
+              <View style={{ marginTop: 4 }}>
+                <Text style={[theme.typography.caption, { marginBottom: 6, color: theme.colors.textSecondary }]}>Password</Text>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => setPwdOpen(o => !o)}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center',
+                    borderWidth: 1, borderColor: theme.colors.border,
+                    backgroundColor: theme.colors.surface,
+                    borderRadius: theme.radius.m,
+                    paddingHorizontal: 12, paddingVertical: 12,
+                    gap: 8,
+                  }}
+                >
+                  <Icon name="lock-closed-outline" size={16} color={theme.colors.textSecondary} />
+                  <Text style={[theme.typography.body, { flex: 1, letterSpacing: 2 }]}>••••••••</Text>
+                  <Icon name={pwdOpen ? 'chevron-up' : 'create-outline'} size={18} color={theme.colors.primary} />
+                </TouchableOpacity>
+
+                {pwdOpen ? (
+                  <View style={{ marginTop: theme.spacing.s, paddingTop: theme.spacing.s, borderTopWidth: 1, borderTopColor: theme.colors.border }}>
+                    <Text style={[theme.typography.caption, { marginBottom: theme.spacing.s }]}>
+                      Inserisci la password attuale e la nuova password.
+                    </Text>
+                    <PasswordField label="Password attuale" value={curPwd} onChangeText={setCurPwd} />
+                    <PasswordField label="Nuova password" value={newPwd} onChangeText={setNewPwd} />
+                    {newPwd.length > 0 ? <PasswordRules value={newPwd} /> : null}
+                    <PasswordField label="Conferma nuova password" value={newPwd2} onChangeText={setNewPwd2} />
+                  </View>
+                ) : null}
+              </View>
+
               {error ? (
                 <Text style={{ color: theme.colors.danger, marginBottom: theme.spacing.s }}>{error}</Text>
               ) : null}
@@ -190,7 +297,13 @@ export default function ProfileScreen({ navigation }: Props) {
                   <Button title={t('common.cancel')} variant="subtle" onPress={cancelEdit} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Button title={t('profile.save')} icon="checkmark" onPress={save} loading={saving} />
+                  <Button
+                    title={t('profile.save')}
+                    icon="checkmark"
+                    onPress={save}
+                    loading={saving}
+                    disabled={wantsPwdChange && !newPwdStrong}
+                  />
                 </View>
               </View>
             </>
@@ -237,10 +350,31 @@ export default function ProfileScreen({ navigation }: Props) {
             Vedi tutti i turni passati e le richieste di scambio.
           </Text>
           <Button title="Apri storico" variant="secondary" icon="time-outline"
-            onPress={() => {
-              // Profile è ora uno screen normale, navigate funziona direttamente
-              navigation.navigate('History');
-            }}
+            onPress={() => navigation.navigate('History')}
+          />
+        </Card>
+
+        {/* Preferenze notifiche */}
+        <Card>
+          <Text style={[theme.typography.h3, { marginBottom: theme.spacing.s }]}>{t('notifPrefs.title')}</Text>
+          <Text style={[theme.typography.caption, { marginBottom: theme.spacing.m }]}>
+            {t('notifPrefs.intro')}
+          </Text>
+          <Button title={t('notifPrefs.open')} variant="secondary" icon="notifications-outline"
+            onPress={() => navigation.navigate('NotificationPreferences')} />
+        </Card>
+
+        {/* DEV: scadenza password (sempre visibile) */}
+        <Card>
+          <Text style={[theme.typography.h3, { marginBottom: theme.spacing.s }]}>Strumenti sviluppatore</Text>
+          <Text style={[theme.typography.caption, { marginBottom: theme.spacing.m }]}>
+            Bottone usato solo per testare il flusso di scadenza password.
+          </Text>
+          <Button
+            title="DEV: simula scadenza password (1 anno)"
+            variant="danger"
+            icon="bug-outline"
+            onPress={onDevExpire}
           />
         </Card>
 
@@ -248,6 +382,18 @@ export default function ProfileScreen({ navigation }: Props) {
           <Button title={t('profile.logout')} variant="danger" icon="log-out-outline" onPress={onLogout} />
         </Card>
       </ScrollView>
+
+      <ConfirmModal
+        visible={!!popup}
+        title={popup?.title ?? ''}
+        message={popup?.message}
+        tone={popup?.tone}
+        icon={popup?.icon}
+        confirmLabel={popup?.confirmLabel}
+        cancelLabel={popup?.cancelLabel}
+        onConfirm={popup?.onConfirm ? () => { const fn = popup.onConfirm; setPopup(null); fn?.(); } : undefined}
+        onClose={() => setPopup(null)}
+      />
     </SafeAreaView>
   );
 }

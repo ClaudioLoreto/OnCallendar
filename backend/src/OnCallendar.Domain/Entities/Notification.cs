@@ -15,15 +15,29 @@ public class Notification : BaseEntity, ITenantScoped
     public ApplicationUser User { get; set; } = null!;
 
     /// <summary>
-    /// Tipo: "SwapIncoming" | "SwapAccepted" | "SwapRejected" | "SwapCancelled" | "SwapAutoCancel".
+    /// Tipo evento (vedi <see cref="OnCallendar.Domain.Notifications.NotificationTypeCodes"/>).
+    /// Es: "SwapRequested", "SwapAccepted", "SwapRejected", "ShiftReassigned",
+    /// "ExternalDoctorAssigned", "ReminderShiftTomorrow"...
     /// </summary>
     public string Type { get; set; } = null!;
 
-    /// <summary>Testo leggibile dall'utente (già in italiano).</summary>
+    /// <summary>Titolo breve (mostrato in lista notifiche e push).</summary>
+    public string? Title { get; set; }
+
+    /// <summary>Testo leggibile dall'utente (già nella lingua corretta).</summary>
     public string Message { get; set; } = null!;
+
+    /// <summary>
+    /// Categoria visiva: "swap" | "shift" | "system" | "reminder".
+    /// Usata dal client per scegliere icona/colore.
+    /// </summary>
+    public string? Category { get; set; }
 
     public bool IsRead { get; set; }
 
-    /// <summary>Id della SwapRequest correlata (opzionale per navigazione diretta).</summary>
+    /// <summary>Id dell'entità correlata (SwapRequest, Shift, ...) per deep-link.</summary>
     public Guid? RelatedEntityId { get; set; }
+
+    /// <summary>JSON con metadata extra per il client (deep-link, payload push, ...).</summary>
+    public string? DataJson { get; set; }
 }

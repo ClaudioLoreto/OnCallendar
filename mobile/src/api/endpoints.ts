@@ -103,13 +103,26 @@ export type SwapDto = {
 };
 
 // ---------- Notifications ----------
+export type NotificationCategory = 'swap' | 'shift' | 'reminder' | 'system';
+
 export type NotificationDto = {
   id: string;
-  type: string;       // "SwapIncoming" | "SwapAccepted" | "SwapRejected" | "SwapCancelled" | "SwapAutoCancel" | "SwapCounter" | "SwapCounterRejected"
+  type: string;       // codici: SwapRequested, SwapAccepted, ... (vedi NotificationTypeCodes backend)
+  title: string | null;
   message: string;
+  category: NotificationCategory | string | null;
   isRead: boolean;
   relatedEntityId: string | null;
+  dataJson: string | null;
   createdAtUtc: string;
+};
+
+export type NotificationChannel = 'Email' | 'InApp' | 'Push';
+
+export type NotificationPreferenceDto = {
+  type: string;
+  channel: NotificationChannel;
+  enabled: boolean;
 };
 
 // ---------- Counter Offers (trattative) ----------
@@ -145,15 +158,26 @@ export type MeDto = {
   themePreference: string;
   emailConfirmed: boolean;
   phoneConfirmed: boolean;
+  isDefaultEmail: boolean;
+  pendingEmail: string | null;
+  passwordChangeRequired: boolean;
+  passwordExpired: boolean;
+  passwordChangedAtUtc: string | null;
 };
 
 // ---------- API ----------
 
 export const AuthApi = {
-  forgotPassword: (emailOrPhone: string) =>
-    apiClient.post('/api/auth/forgot-password', { emailOrPhone }).then(r => r.data),
-  verifyOtp: (emailOrPhone: string, otp: string, newPassword: string) =>
-    apiClient.post('/api/auth/verify-otp', { emailOrPhone, otp, newPassword }).then(r => r.data),
+  forgotPassword: (email: string, clientCallbackUrl?: string) =>
+    apiClient.post('/api/auth/forgot-password', { email, clientCallbackUrl }).then(r => r.data),
+  resetPassword: (email: string, token: string, newPassword: string) =>
+    apiClient.post('/api/auth/reset-password', { email, token, newPassword }).then(r => r.data),
+  getExternalInvite: (token: string) =>
+    apiClient.get<{ firstName: string; lastName: string; email: string | null }>(`/api/auth/external-invite/${encodeURIComponent(token)}`).then(r => r.data),
+  registerExternal: (token: string, email: string, password: string) =>
+    apiClient.post('/api/auth/register-external', { token, email, password }).then(r => r.data),
+  confirmEmailChange: (token: string) =>
+    apiClient.post<{ ok: boolean; email: string }>('/api/auth/confirm-email-change', { token }).then(r => r.data),
 };
 
 export const ShiftsApi = {
@@ -161,8 +185,8 @@ export const ShiftsApi = {
   all:  () => apiClient.get<ShiftDto[]>('/api/shifts').then(r => r.data),
   publish:   (id: string) => apiClient.post(`/api/shifts/${id}/publish-on-board`),
   unpublish: (id: string) => apiClient.post(`/api/shifts/${id}/unpublish`),
-  assignExternal: (id: string, firstName: string, lastName: string, phone?: string) =>
-    apiClient.post<ShiftDto>(`/api/shifts/${id}/assign-external`, { firstName, lastName, phone })
+  assignExternal: (id: string, firstName: string, lastName: string, phone?: string, email?: string) =>
+    apiClient.post<ShiftDto>(`/api/shifts/${id}/assign-external`, { firstName, lastName, phone, email })
       .then(r => r.data),
   clearExternal: (id: string) =>
     apiClient.post<ShiftDto>(`/api/shifts/${id}/clear-external`).then(r => r.data),
@@ -209,6 +233,10 @@ export const UsersApi = {
   }>) => apiClient.patch<MeDto>('/api/users/me', patch).then(r => r.data),
   changePassword: (currentPassword: string, newPassword: string) =>
     apiClient.post('/api/users/me/change-password', { currentPassword, newPassword }),
+  requestEmailChange: (newEmail: string, clientCallbackUrl?: string) =>
+    apiClient.post<{ ok: boolean; pendingEmail: string }>('/api/users/me/request-email-change', { newEmail, clientCallbackUrl }).then(r => r.data),
+  devExpirePassword: () =>
+    apiClient.post('/api/users/me/dev-expire-password').then(r => r.data),
   uploadAvatar: async (uri: string) => {
     const fd = new FormData();
     const ext = (uri.split('.').pop() || 'jpg').toLowerCase();
@@ -261,6 +289,17 @@ export const NotificationsApi = {
   unreadCount: () => apiClient.get<{ count: number }>('/api/notifications/unread-count').then(r => r.data.count),
   markRead: (id: string) => apiClient.post(`/api/notifications/${id}/read`),
   markAllRead: () => apiClient.post('/api/notifications/mark-all-read'),
+  getPreferences: () =>
+    apiClient.get<NotificationPreferenceDto[]>('/api/notifications/preferences').then(r => r.data),
+  setPreference: (type: string, channel: NotificationChannel, enabled: boolean) =>
+    apiClient.put('/api/notifications/preferences', { type, channel, enabled }),
+};
+
+export const DeviceTokensApi = {
+  register: (token: string, platform: string, deviceName?: string) =>
+    apiClient.post('/api/device-tokens', { token, platform, deviceName }),
+  unregister: (token: string) =>
+    apiClient.delete(`/api/device-tokens/${encodeURIComponent(token)}`),
 };
 
 // ---------- Helpers ----------

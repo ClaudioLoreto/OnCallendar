@@ -23,6 +23,11 @@ export default function CalendarScreen({ navigation }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Filtri retraibili
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [showOnlyMine, setShowOnlyMine] = useState(true);
+  const [rangeDays, setRangeDays] = useState(14);
+
   // Sheet azioni sul mio turno
   const [actionShift, setActionShift] = useState<ShiftDto | null>(null);
   const [externalShift, setExternalShift] = useState<ShiftDto | null>(null);
@@ -30,10 +35,10 @@ export default function CalendarScreen({ navigation }: Props) {
   const load = useCallback(async () => {
     setError(null);
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    const to = new Date(today); to.setDate(to.getDate() + 14);
+    const to = new Date(today); to.setDate(to.getDate() + rangeDays);
     const d = await CalendarApi.list(today, to);
     setDays(d);
-  }, []);
+  }, [rangeDays]);
 
   useEffect(() => {
     (async () => {
@@ -121,13 +126,11 @@ export default function CalendarScreen({ navigation }: Props) {
               <Avatar fullName={s.medicoTurno.fullName} url={s.medicoTurno.avatarUrl} size={26} />
               <Text style={[theme.typography.body, { flex: 1, fontWeight: s.isMineTurno ? '700' : '400' }]}>
                 {s.medicoTurno.fullName}
-                {s.isMineTurno ? ' (tu)' : ''}
               </Text>
             </>
           ) : (
             <Text style={[theme.typography.caption, { fontStyle: 'italic' }]}>Nessun medico assegnato</Text>
           )}
-          <Text style={theme.typography.caption}>turno</Text>
         </View>
 
         {/* Medico reperibile */}
@@ -141,9 +144,8 @@ export default function CalendarScreen({ navigation }: Props) {
               fontWeight: s.isMineReperibile ? '700' : '400',
               color: theme.colors.textSecondary,
             }]}>
-              {s.medicoReperibile.fullName}{s.isMineReperibile ? ' (tu)' : ''}
+              {s.medicoReperibile.fullName}
             </Text>
-            <Badge label="Reperibile" tone="neutral" />
           </View>
         ) : null}
 
@@ -196,12 +198,91 @@ export default function CalendarScreen({ navigation }: Props) {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }}>
       <AppHeader title={t('calendar.title')} onAvatarPress={() => navigation.navigate('Profile')} onBellPress={() => navigation.navigate('Notifications')} />
+
+      {/* Barra filtri retraibile */}
+      <View style={{ paddingHorizontal: theme.spacing.l, paddingBottom: theme.spacing.s }}>
+        <TouchableOpacity
+          onPress={() => setFiltersOpen(o => !o)}
+          activeOpacity={0.7}
+          style={{
+            flexDirection: 'row', alignItems: 'center', gap: 6,
+            paddingVertical: 6, paddingHorizontal: 10,
+            backgroundColor: theme.colors.surfaceAlt,
+            borderRadius: 16, alignSelf: 'flex-start',
+          }}
+        >
+          <Icon name="options-outline" size={14} color={theme.colors.textSecondary} />
+          <Text style={[theme.typography.caption, { fontWeight: '700' }]}>
+            {showOnlyMine ? 'Solo miei' : 'Tutti'} · {rangeDays}gg
+          </Text>
+          <Icon name={filtersOpen ? 'chevron-up' : 'chevron-down'} size={14} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+
+        {filtersOpen ? (
+          <View style={{
+            marginTop: 8,
+            backgroundColor: theme.colors.surface,
+            borderRadius: theme.radius.m,
+            padding: theme.spacing.m,
+            borderWidth: 1, borderColor: theme.colors.border,
+          }}>
+            <Text style={[theme.typography.caption, { fontWeight: '700', marginBottom: 6 }]}>Mostra</Text>
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+              {(['only', 'all'] as const).map(k => {
+                const active = (k === 'only') === showOnlyMine;
+                return (
+                  <TouchableOpacity
+                    key={k}
+                    onPress={() => setShowOnlyMine(k === 'only')}
+                    activeOpacity={0.7}
+                    style={{
+                      paddingVertical: 6, paddingHorizontal: 12,
+                      borderRadius: 14,
+                      backgroundColor: active ? theme.colors.primary : theme.colors.surfaceAlt,
+                    }}
+                  >
+                    <Text style={{ color: active ? '#fff' : theme.colors.textSecondary, fontSize: 12, fontWeight: '700' }}>
+                      {k === 'only' ? 'Solo miei' : 'Tutti'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={[theme.typography.caption, { fontWeight: '700', marginBottom: 6 }]}>Giorni mostrati</Text>
+            <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+              {[7, 14, 30, 60, 90].map(n => {
+                const active = rangeDays === n;
+                return (
+                  <TouchableOpacity
+                    key={n}
+                    onPress={() => setRangeDays(n)}
+                    activeOpacity={0.7}
+                    style={{
+                      paddingVertical: 6, paddingHorizontal: 12,
+                      borderRadius: 14,
+                      backgroundColor: active ? theme.colors.primary : theme.colors.surfaceAlt,
+                    }}
+                  >
+                    <Text style={{ color: active ? '#fff' : theme.colors.textSecondary, fontSize: 12, fontWeight: '700' }}>
+                      {n}gg
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+      </View>
+
       {loading ? (
         <EmptyState title={t('common.loading')} />
       ) : (
         <FlatList
           contentContainerStyle={{ padding: theme.spacing.l, paddingTop: theme.spacing.s }}
-          data={days}
+          data={showOnlyMine
+            ? days.filter(d => d.shifts.some(s => s.isMineTurno || s.isMineReperibile))
+            : days}
           keyExtractor={d => d.date}
           renderItem={renderDay}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -236,29 +317,69 @@ export default function CalendarScreen({ navigation }: Props) {
               </View>
             </View>
 
-            <View style={{ gap: theme.spacing.s }}>
-              <Button
-                title="Proponi cessione"
-                icon="arrow-forward-circle-outline"
-                onPress={() => goToWizard('cessione')}
-              />
-              <Button
-                title="Proponi scambio"
-                icon="swap-horizontal-outline"
-                variant="secondary"
-                onPress={() => goToWizard('scambio')}
-              />
-              <Button
-                title={actionShift?.externalDoctor ? 'Gestisci medico esterno' : 'Affida a medico esterno'}
-                icon="person-add-outline"
-                variant="secondary"
-                onPress={() => {
-                  const s = actionShift;
-                  setActionShift(null);
-                  setExternalShift(s);
-                }}
-              />
-            </View>
+            {actionShift.externalDoctor ? (
+              <View style={{ gap: theme.spacing.s }}>
+                <View style={{
+                  padding: theme.spacing.m, borderRadius: theme.radius.m,
+                  backgroundColor: theme.colors.surfaceAlt, marginBottom: theme.spacing.s,
+                  borderWidth: 1, borderColor: theme.colors.border,
+                  flexDirection: 'row', alignItems: 'center', gap: 8,
+                }}>
+                  <Icon name="person-add-outline" size={18} color={theme.colors.warning} />
+                  <Text style={[theme.typography.body, { flex: 1, fontWeight: '600' }]}>
+                    Coperto da: {actionShift.externalDoctor.fullName}
+                  </Text>
+                </View>
+                <Button
+                  title="Rimuovi turno dottore esterno"
+                  icon="close-circle-outline"
+                  variant="danger"
+                  onPress={async () => {
+                    const s = actionShift;
+                    if (!s) return;
+                    try {
+                      const updated = await ShiftsApi.clearExternal(s.id);
+                      setDays(prev => prev.map(d => ({
+                        ...d,
+                        shifts: d.shifts.map(x => x.id === updated.id ? updated : x),
+                      })));
+                      setActionShift(null);
+                    } catch {
+                      setActionShift(null);
+                    }
+                  }}
+                />
+                <Button
+                  title="Annulla"
+                  variant="subtle"
+                  onPress={() => setActionShift(null)}
+                />
+              </View>
+            ) : (
+              <View style={{ gap: theme.spacing.s }}>
+                <Button
+                  title="Proponi cessione"
+                  icon="arrow-forward-circle-outline"
+                  onPress={() => goToWizard('cessione')}
+                />
+                <Button
+                  title="Proponi scambio"
+                  icon="swap-horizontal-outline"
+                  variant="secondary"
+                  onPress={() => goToWizard('scambio')}
+                />
+                <Button
+                  title="Affida a medico esterno"
+                  icon="person-add-outline"
+                  variant="secondary"
+                  onPress={() => {
+                    const s = actionShift;
+                    setActionShift(null);
+                    setExternalShift(s);
+                  }}
+                />
+              </View>
+            )}
           </ScrollView>
         ) : null}
       </Sheet>

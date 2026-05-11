@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, RefreshControl, SafeAreaView, Text, TouchableOpacity, View } from 'react-native';
-import { Badge, Card, EmptyState, Icon, SegmentedControl } from '../components/ui';
+import { Avatar, Badge, Card, EmptyState, Icon, SegmentedControl } from '../components/ui';
 import {
   CalendarApi, ShiftDto, SwapDto, SwapsApi,
   formatDayLong, shiftCodeIcon, shiftCodeShort, shiftCodeTone,
@@ -10,12 +10,15 @@ import { useTheme } from '../theme/ThemeContext';
 import { useI18n } from '../i18n/I18nContext';
 
 type Tab = 'shifts' | 'swaps';
+type Scope = 'mine' | 'all';
 
 export default function HistoryScreen() {
   const { theme } = useTheme();
   const { locale } = useI18n();
   const [tab, setTab] = useState<Tab>('shifts');
-  const [pastShifts, setPastShifts] = useState<ShiftDto[]>([]);
+  const [scope, setScope] = useState<Scope>('mine');
+  const [myShifts, setMyShifts] = useState<ShiftDto[]>([]);
+  const [allShifts, setAllShifts] = useState<ShiftDto[]>([]);
   const [allSwaps, setAllSwaps] = useState<SwapDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -33,13 +36,15 @@ export default function HistoryScreen() {
     { month: 'long', year: 'numeric' },
   );
 
+  const sourceShifts = scope === 'mine' ? myShifts : allShifts;
+
   const filteredShifts = useMemo(() => {
     const y = filterMonth.getFullYear(); const m = filterMonth.getMonth();
-    return pastShifts.filter(s => {
+    return sourceShifts.filter(s => {
       const d = new Date(s.date);
       return d.getFullYear() === y && d.getMonth() === m;
     });
-  }, [pastShifts, filterMonth]);
+  }, [sourceShifts, filterMonth]);
 
   const filteredSwaps = useMemo(() => {
     const y = filterMonth.getFullYear(); const m = filterMonth.getMonth();
@@ -58,11 +63,17 @@ export default function HistoryScreen() {
       CalendarApi.list(from, to),
       SwapsApi.history(),
     ]);
-    const flat: ShiftDto[] = [];
+    const mine: ShiftDto[] = [];
+    const all: ShiftDto[] = [];
     for (const d of days) for (const s of d.shifts) {
-      if (s.isMineTurno || s.isMineReperibile) flat.push(s);
+      all.push(s);
+      if (s.isMineTurno || s.isMineReperibile) mine.push(s);
     }
-    setPastShifts(flat.sort((a, b) => b.startUtc.localeCompare(a.startUtc)));
+    // "I miei" desc (più recente in alto), "Tutti" asc (dal 1° al 30 del mese)
+    const cmpDesc = (a: ShiftDto, b: ShiftDto) => b.startUtc.localeCompare(a.startUtc);
+    const cmpAsc  = (a: ShiftDto, b: ShiftDto) => a.startUtc.localeCompare(b.startUtc);
+    setMyShifts(mine.sort(cmpDesc));
+    setAllShifts(all.sort(cmpAsc));
     setAllSwaps(history.sort((a, b) => b.createdAtUtc.localeCompare(a.createdAtUtc)));
   }, []);
 
@@ -104,6 +115,20 @@ export default function HistoryScreen() {
       </View>
       <MonthPicker />
 
+      {/* Filtro ambito: visibile solo nel tab Turni */}
+      {tab === 'shifts' ? (
+        <View style={{ paddingHorizontal: theme.spacing.l, paddingBottom: theme.spacing.s }}>
+          <SegmentedControl<Scope>
+            value={scope}
+            onChange={setScope}
+            options={[
+              { label: 'Solo i miei', value: 'mine' },
+              { label: 'Tutti', value: 'all' },
+            ]}
+          />
+        </View>
+      ) : null}
+
       {loading ? (
         <EmptyState title="Caricamento…" />
       ) : tab === 'shifts' ? (
@@ -112,7 +137,12 @@ export default function HistoryScreen() {
           data={filteredShifts}
           keyExtractor={s => s.id}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          ListEmptyComponent={<EmptyState icon="archive-outline" title="Nessun turno in questo mese" />}
+          ListEmptyComponent={
+            <EmptyState
+              icon="archive-outline"
+              title={scope === 'mine' ? 'Nessun tuo turno in questo mese' : 'Nessun turno in questo mese'}
+            />
+          }
           renderItem={({ item: s }) => (
             <Card>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -130,6 +160,46 @@ export default function HistoryScreen() {
               <Text style={theme.typography.caption}>
                 {shiftCodeShort(s.code)} · {s.startLocal} – {s.endLocal}
               </Text>
+
+              {/* In modalità "Tutti": mostra chi era di turno e chi reperibile */}
+              {scope === 'all' ? (
+                <View style={{ marginTop: theme.spacing.s, gap: 4 }}>
+                  {s.medicoTurno ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Avatar fullName={s.medicoTurno.fullName} url={s.medicoTurno.avatarUrl} size={22} />
+                      <Text style={[theme.typography.caption, { flex: 1, fontWeight: s.isMineTurno ? '700' : '400' }]}>
+                        {s.medicoTurno.fullName}{s.isMineTurno ? ' (tu)' : ''}
+                      </Text>
+                      <Text style={theme.typography.caption}>turno</Text>
+                    </View>
+                  ) : s.externalDoctor ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Icon name="person-add-outline" size={16} color={theme.colors.warning} />
+                      <Text style={[theme.typography.caption, { flex: 1, fontWeight: '600' }]}>
+                        {s.externalDoctor.fullName}
+                      </Text>
+                      <Badge label="Esterno" tone="warning" />
+                    </View>
+                  ) : (
+                    <Text style={[theme.typography.caption, { fontStyle: 'italic' }]}>
+                      Nessun medico di turno
+                    </Text>
+                  )}
+                  {s.medicoReperibile ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Avatar fullName={s.medicoReperibile.fullName} url={s.medicoReperibile.avatarUrl} size={20} />
+                      <Text style={[theme.typography.caption, {
+                        flex: 1,
+                        fontWeight: s.isMineReperibile ? '700' : '400',
+                        color: theme.colors.textSecondary,
+                      }]}>
+                        {s.medicoReperibile.fullName}{s.isMineReperibile ? ' (tu)' : ''}
+                      </Text>
+                      <Badge label="Reperibile" tone="neutral" />
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
             </Card>
           )}
         />

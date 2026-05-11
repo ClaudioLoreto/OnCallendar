@@ -50,6 +50,31 @@ public class ApplicationUser : IdentityUser<Guid>, ISoftDeletable
     public DateTime CreatedAtUtc { get; set; }
     public DateTime? UpdatedAtUtc { get; set; }
 
+    /// <summary>
+    /// Data UTC dell'ultimo cambio password (sia volontario che reset). Usato per
+    /// determinare la scadenza annuale e forzare il cambio password al login.
+    /// </summary>
+    public DateTime? PasswordChangedAtUtc { get; set; }
+
+    /// <summary>
+    /// True se l'email è quella generata in fase di seed (es. medico1@navelli.local)
+    /// e l'utente non l'ha ancora sostituita con la propria reale. Mostra una
+    /// notifica fissa in app finché non viene confermata.
+    /// </summary>
+    public bool IsDefaultEmail { get; set; }
+
+    /// <summary>
+    /// Nuovo indirizzo email richiesto dall'utente, in attesa di conferma via link.
+    /// Diventa <see cref="IdentityUser{Guid}.Email"/> solo dopo conferma.
+    /// </summary>
+    public string? PendingEmail { get; set; }
+
+    /// <summary>Token monouso per confermare il cambio email.</summary>
+    public string? EmailChangeToken { get; set; }
+
+    /// <summary>Data UTC di invio della richiesta di cambio email (anti-replay).</summary>
+    public DateTime? EmailChangeRequestedAtUtc { get; set; }
+
     // Soft delete
     public bool IsDeleted { get; set; }
     public DateTime? DeletedAtUtc { get; set; }

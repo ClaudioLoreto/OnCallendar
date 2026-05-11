@@ -225,34 +225,42 @@ export default function SwapsScreen({ navigation, route }: Props) {
     setStepError(null);
   };
 
-  // I miei turni futuri (di cui sono medico di turno)
+  // I miei turni futuri (di cui sono medico di turno) — limitati al MESE CORRENTE
   const myShifts = useMemo<ShiftDto[]>(() => {
+    const now = new Date();
+    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const out: ShiftDto[] = [];
     for (const d of days) for (const s of d.shifts) {
-      if (s.isMineTurno && !s.isPast) out.push(s);
+      if (s.isMineTurno && !s.isPast && s.date.startsWith(ym)) out.push(s);
     }
     return out;
   }, [days]);
 
   // Date dei miei turni → set di stringhe (per evitare candidati nello stesso giorno)
   const myShiftDates = useMemo<Set<string>>(() => {
+    const now = new Date();
+    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const s = new Set<string>();
-    for (const d of days) for (const sh of d.shifts) if (sh.isMineTurno && !sh.isPast) s.add(sh.date);
+    for (const d of days) for (const sh of d.shifts) if (sh.isMineTurno && !sh.isPast && sh.date.startsWith(ym)) s.add(sh.date);
     return s;
   }, [days]);
 
   // Turni candidati per scambio: tutti i turni futuri dei colleghi selezionati,
   // raggruppati per collega. Esclude i turni in giorni in cui ho già un mio turno
   // (per evitare che il sistema rifiuti subito per sovrapposizione).
+  // Anche i candidati sono limitati al MESE CORRENTE.
   type ColleagueGroup = { medico: MedicoDto; shifts: ShiftDto[] };
   const counterGroups = useMemo<ColleagueGroup[]>(() => {
     if (mode !== 'scambio' || pickedColleagues.size === 0) return [];
+    const now = new Date();
+    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const out: ColleagueGroup[] = [];
     for (const m of colleagues) {
       if (!pickedColleagues.has(m.id)) continue;
       const shifts: ShiftDto[] = [];
       for (const d of days) for (const s of d.shifts) {
         if (s.isPast) continue;
+        if (!s.date.startsWith(ym)) continue;
         if (s.medicoTurno?.id !== m.id) continue;
         if (myShiftDates.has(s.date) && s.date !== pickedShift?.date) continue;
         shifts.push(s);
@@ -310,9 +318,11 @@ export default function SwapsScreen({ navigation, route }: Props) {
   };
 
   const myCounterShifts = useMemo<ShiftDto[]>(() => {
+    const now = new Date();
+    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const out: ShiftDto[] = [];
     for (const d of counterDays) for (const s of d.shifts) {
-      if (s.isMineTurno && !s.isPast) out.push(s);
+      if (s.isMineTurno && !s.isPast && s.date.startsWith(ym)) out.push(s);
     }
     return out;
   }, [counterDays]);
@@ -616,25 +626,6 @@ export default function SwapsScreen({ navigation, route }: Props) {
                 <Icon name="people-outline" size={16} color={theme.colors.textPrimary} />
                 {'  '}2. {mode === 'scambio' ? 'Con quali colleghi puoi scambiare?' : 'A chi cedi? (seleziona uno o più)'}
               </Text>
-              {colleagues.length > 1 ? (
-                <View style={{ flexDirection: 'row', gap: theme.spacing.s, marginBottom: theme.spacing.s }}>
-                  <View style={{ flex: 1 }}>
-                    <Button
-                      title={pickedColleagues.size === colleagues.length ? 'Deseleziona tutti' : 'Seleziona tutti'}
-                      icon={pickedColleagues.size === colleagues.length ? 'square-outline' : 'checkbox-outline'}
-                      variant="subtle" compact
-                      onPress={() => {
-                        if (pickedColleagues.size === colleagues.length) {
-                          setPickedColleagues(new Set());
-                          setPickedCounterShiftIds(new Set());
-                        } else {
-                          setPickedColleagues(new Set(colleagues.map(c => c.id)));
-                        }
-                      }}
-                    />
-                  </View>
-                </View>
-              ) : null}
               {colleagues.map(m => {
                 const active = pickedColleagues.has(m.id);
                 return (

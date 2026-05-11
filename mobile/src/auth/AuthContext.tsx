@@ -1,6 +1,7 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import apiClient, { setAuthToken, setOnUnauthorized } from '../api/apiClient';
+import { registerForPushNotificationsAsync, unregisterPushAsync } from '../notifications/pushRegistration';
 
 export type AuthUser = {
   userId: string;
@@ -25,8 +26,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const pushTokenRef = useRef<string | null>(null);
 
   const logout = useCallback(async () => {
+    // best-effort unregister del device token prima di pulire l'auth
+    await unregisterPushAsync(pushTokenRef.current);
+    pushTokenRef.current = null;
     setAuthToken(null);
     setToken(null);
     setUser(null);
@@ -48,6 +53,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setAuthToken(parsed.token);
           setToken(parsed.token);
           setUser(parsed.user);
+          // Refresh push token al riavvio (best effort).
+          void registerForPushNotificationsAsync().then(t => { pushTokenRef.current = t; });
         }
       } finally {
         setLoading(false);
@@ -68,6 +75,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToken(data.token);
     setUser(u);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ token: data.token, user: u }));
+    // Registra il device per le push (best effort).
+    void registerForPushNotificationsAsync().then(t => { pushTokenRef.current = t; });
   }, []);
 
   const value = useMemo<AuthState>(

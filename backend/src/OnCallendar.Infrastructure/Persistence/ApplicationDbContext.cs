@@ -25,8 +25,11 @@ public class ApplicationDbContext
     public DbSet<SwapRequest> SwapRequests => Set<SwapRequest>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<NotificationPreference> NotificationPreferences => Set<NotificationPreference>();
+    public DbSet<UserDeviceToken> UserDeviceTokens => Set<UserDeviceToken>();
     public DbSet<SwapCounterOffer> SwapCounterOffers => Set<SwapCounterOffer>();
     public DbSet<ExternalDoctor> ExternalDoctors => Set<ExternalDoctor>();
+    public DbSet<ShiftAssignmentHistory> ShiftAssignmentHistories => Set<ShiftAssignmentHistory>();
 
     // Tabelle di lookup (cataloghi codici/descrizioni).
     public DbSet<RoleType> RoleTypes => Set<RoleType>();
@@ -62,11 +65,28 @@ public class ApplicationDbContext
         builder.Entity<Notification>().HasQueryFilter(n =>
             currentTenantId == null || n.TenantId == currentTenantId);
 
+        builder.Entity<NotificationPreference>().HasQueryFilter(p =>
+            currentTenantId == null || p.TenantId == currentTenantId);
+
+        builder.Entity<UserDeviceToken>().HasQueryFilter(d =>
+            currentTenantId == null || d.TenantId == currentTenantId);
+
         builder.Entity<SwapCounterOffer>().HasQueryFilter(o =>
             currentTenantId == null || o.TenantId == currentTenantId);
 
         builder.Entity<ExternalDoctor>().HasQueryFilter(e =>
             currentTenantId == null || e.TenantId == currentTenantId);
+
+        builder.Entity<ShiftAssignmentHistory>(b =>
+        {
+            b.HasIndex(x => new { x.ShiftId, x.AtUtc });
+            b.HasOne(x => x.Shift)
+                .WithMany()
+                .HasForeignKey(x => x.ShiftId)
+                .OnDelete(DeleteBehavior.Cascade);
+            b.HasQueryFilter(h =>
+                currentTenantId == null || h.TenantId == currentTenantId);
+        });
 
         // Su Postgres, rimuovi tutti i filtri SqlServer-style ("[Col] IS NOT NULL")
         // ereditati da ASP.NET Identity e da EF: Postgres tratta NULL come distinti,

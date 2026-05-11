@@ -1,11 +1,16 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using OnCallendar.Application.Common.Interfaces;
 using OnCallendar.Application.Common.Services;
 using OnCallendar.Domain.Entities;
 using OnCallendar.Domain.Enums;
+using OnCallendar.Infrastructure.Mail;
 using OnCallendar.Infrastructure.Persistence;
+using System.Security.Cryptography;
+using System.Web;
 using static OnCallendar.Api.Controllers.ShiftDtos;
 
 namespace OnCallendar.Api.Controllers;
@@ -21,10 +26,20 @@ public sealed class ShiftsController : ControllerBase
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _user;
     private readonly IAuditLogger _audit;
+    private readonly IEmailSender _email;
+    private readonly MailSettings _mail;
+    private readonly ILogger<ShiftsController> _logger;
 
-    public ShiftsController(ApplicationDbContext db, ICurrentUserService user, IAuditLogger audit)
+    public ShiftsController(
+        ApplicationDbContext db,
+        ICurrentUserService user,
+        IAuditLogger audit,
+        IEmailSender email,
+        IOptions<MailSettings> mailOpt,
+        ILogger<ShiftsController> logger)
     {
         _db = db; _user = user; _audit = audit;
+        _email = email; _mail = mailOpt.Value; _logger = logger;
     }
 
     /// <summary>Tutti i turni in finestra (default ±30gg).</summary>
@@ -100,7 +115,7 @@ public sealed class ShiftsController : ControllerBase
         return NoContent();
     }
 
-    public sealed record AssignExternalRequest(string FirstName, string LastName, string? Phone);
+    public sealed record AssignExternalRequest(string FirstName, string LastName, string? Phone, string? Email);
 
     /// <summary>
     /// Assegna il turno a un medico ESTERNO (non utente dell'app). Se il
@@ -130,6 +145,7 @@ public sealed class ShiftsController : ControllerBase
         var existing = await _db.ExternalDoctors
             .FirstOrDefaultAsync(e => e.TenantId == s.TenantId && e.NormalizedKey == key);
 
+        var emailNorm = string.IsNullOrWhiteSpace(body?.Email) ? null : body!.Email.Trim();
         ExternalDoctor ext;
         if (existing is not null)
         {
@@ -138,6 +154,11 @@ public sealed class ShiftsController : ControllerBase
             if (!string.IsNullOrWhiteSpace(body?.Phone))
             {
                 ext.Phone = body.Phone.Trim();
+                ext.UpdatedAtUtc = DateTime.UtcNow;
+            }
+            if (!string.IsNullOrWhiteSpace(emailNorm) && string.IsNullOrWhiteSpace(ext.Email))
+            {
+                ext.Email = emailNorm;
                 ext.UpdatedAtUtc = DateTime.UtcNow;
             }
         }
@@ -150,11 +171,54 @@ public sealed class ShiftsController : ControllerBase
                 LastName = last,
                 NormalizedKey = key,
                 Phone = string.IsNullOrWhiteSpace(body?.Phone) ? null : body!.Phone.Trim(),
+                Email = emailNorm,
                 CreatedAtUtc = DateTime.UtcNow,
             };
             _db.ExternalDoctors.Add(ext);
             await _db.SaveChangesAsync();
             _audit.Log("ExternalDoctor", ext.Id, "Created", s.TenantId);
+        }
+
+        // Invio invito di registrazione (solo se: email presente, non ancora registrato e
+        // non già invitato di recente o se l'email cambia/è nuova).
+        var shouldInvite =
+            !string.IsNullOrWhiteSpace(ext.Email) &&
+            ext.RegisteredAtUtc is null &&
+            ext.LinkedUserId is null &&
+            (ext.InviteSentAtUtc is null || ext.InviteSentAtUtc < DateTime.UtcNow.AddHours(-1));
+
+        if (shouldInvite)
+        {
+            try
+            {
+                ext.InviteToken = GenerateUrlSafeToken(32);
+                ext.InviteSentAtUtc = DateTime.UtcNow;
+                ext.UpdatedAtUtc = DateTime.UtcNow;
+
+                var baseUrl = !string.IsNullOrWhiteSpace(_mail.MobileDeepLinkBaseUrl)
+                    ? _mail.MobileDeepLinkBaseUrl!.TrimEnd('/')
+                    : (_mail.WebAppBaseUrl ?? string.Empty).TrimEnd('/');
+                var url = $"{baseUrl}/register-external?token={ext.InviteToken}";
+                var html = $@"
+<p>Ciao {HttpUtility.HtmlEncode(ext.FirstName)},</p>
+<p>Sei stato indicato come medico esterno che coprirà un turno su OnCallendar.</p>
+<p>Per gestire i tuoi turni puoi registrarti gratuitamente nell'app:</p>
+<p><a href='{url}' style='display:inline-block;padding:10px 20px;background:#2563eb;color:#fff;border-radius:6px;text-decoration:none;'>Registrati su OnCallendar</a></p>
+<p>Oppure copia e incolla questo link nel browser:<br/><span style='word-break:break-all;'>{url}</span></p>
+<p>Se non vuoi registrarti puoi ignorare questa email: continuerai comunque a coprire i turni concordati.</p>
+<p>— OnCallendar</p>";
+                var text = $"Ciao {ext.FirstName},\n\nRegistrati su OnCallendar aprendo questo link:\n{url}\n\nSe non vuoi registrarti puoi ignorare questa email.";
+                await _email.SendAsync(
+                    toEmail: ext.Email!,
+                    toName: ext.FullName,
+                    subject: "Invito a registrarti su OnCallendar",
+                    htmlBody: html,
+                    plainBody: text);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Shifts/AssignExternal] Errore invio invito a {Email}", ext.Email);
+            }
         }
 
         s.ExternalDoctorId = ext.Id;
@@ -191,4 +255,10 @@ public sealed class ShiftsController : ControllerBase
 
     private static DateOnly? TryParseDate(string? s)
         => DateOnly.TryParse(s, out var d) ? d : null;
+
+    private static string GenerateUrlSafeToken(int byteLength)
+    {
+        var bytes = RandomNumberGenerator.GetBytes(byteLength);
+        return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    }
 }

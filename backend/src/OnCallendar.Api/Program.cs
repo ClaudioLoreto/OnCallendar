@@ -14,10 +14,16 @@ using OnCallendar.Application.Common.Services;
 using OnCallendar.Domain.Entities;
 using OnCallendar.Domain.Services;
 using OnCallendar.Infrastructure.Mail;
+using OnCallendar.Infrastructure.Notifications;
 using OnCallendar.Infrastructure.Persistence;
 using OnCallendar.Infrastructure.Persistence.Seed;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Override locale (gitignored) per dev: lo script start-expo.ps1 lo aggiorna
+// con i tunnel cloudflared correnti. Non viene caricato in produzione perché
+// il file non esiste lì.
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
 
 // In container la cartella wwwroot viene aggiunta DOPO il `dotnet publish`
 // (vedi Dockerfile: COPY --from=web /web/dist ./wwwroot/). Per assicurarsi
@@ -138,9 +144,26 @@ builder.Services.AddAuthorization();
 // Domain services
 builder.Services.AddScoped<IShiftValidationService, ShiftValidationService>();
 
-// Mail (SMTP via MailKit). Sezione "Mail" in appsettings.
+// Mail (Resend via API HTTP, oppure SMTP via MailKit). Sezione "Mail" in appsettings.
 builder.Services.Configure<MailSettings>(builder.Configuration.GetSection("Mail"));
-builder.Services.AddScoped<IEmailSender, MailKitEmailSender>();
+builder.Services.Configure<PushSettings>(builder.Configuration.GetSection("Push"));
+builder.Services.AddHttpClient("resend");
+builder.Services.AddHttpClient("expo-push");
+
+var mailProvider = (builder.Configuration["Mail:Provider"] ?? "Resend").Trim();
+if (string.Equals(mailProvider, "Smtp", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddScoped<IEmailSender, MailKitEmailSender>();
+}
+else
+{
+    builder.Services.AddScoped<IEmailSender, ResendEmailSender>();
+}
+
+// Notifiche multi-canale (in-app + email + push)
+builder.Services.AddSingleton<INotificationTemplateRenderer, NotificationTemplateRenderer>();
+builder.Services.AddScoped<IExpoPushSender, ExpoPushSender>();
+builder.Services.AddScoped<INotificationDispatcher, NotificationDispatcher>();
 
 builder.Services.AddControllers()
     .AddJsonOptions(opt =>

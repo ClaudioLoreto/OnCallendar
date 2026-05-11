@@ -22,6 +22,7 @@ export default function AssignExternalSheet({ shift, onClose, onUpdated }: Props
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName]   = useState('');
   const [phone, setPhone]         = useState('');
+  const [email, setEmail]         = useState('');
   const [suggestions, setSuggestions] = useState<ExternalDoctorDto[]>([]);
   const [loadingSugg, setLoadingSugg] = useState(false);
   const [submitting, setSubmitting]   = useState(false);
@@ -34,6 +35,7 @@ export default function AssignExternalSheet({ shift, onClose, onUpdated }: Props
       setFirstName('');
       setLastName('');
       setPhone('');
+      setEmail('');
       setSuggestions([]);
       setError(null);
     }
@@ -78,7 +80,7 @@ export default function AssignExternalSheet({ shift, onClose, onUpdated }: Props
     setSubmitting(true);
     setError(null);
     try {
-      const updated = await ShiftsApi.assignExternal(shift.id, firstName.trim(), lastName.trim(), phone.trim() || undefined);
+      const updated = await ShiftsApi.assignExternal(shift.id, firstName.trim(), lastName.trim(), phone.trim() || undefined, email.trim() || undefined);
       onUpdated(updated);
       onClose();
     } catch (e: any) {
@@ -162,7 +164,6 @@ export default function AssignExternalSheet({ shift, onClose, onUpdated }: Props
             onChangeText={setFirstName}
             autoCapitalize="words"
             autoCorrect={false}
-            placeholder="Mario"
           />
           <Field
             label="Cognome"
@@ -170,7 +171,6 @@ export default function AssignExternalSheet({ shift, onClose, onUpdated }: Props
             onChangeText={setLastName}
             autoCapitalize="words"
             autoCorrect={false}
-            placeholder="Rossi"
           />
 
           {/* Suggerimenti */}
@@ -222,8 +222,19 @@ export default function AssignExternalSheet({ shift, onClose, onUpdated }: Props
             value={phone}
             onChangeText={setPhone}
             keyboardType="phone-pad"
-            placeholder="+39 333 1234567"
           />
+
+          <Field
+            label="Email (facoltativa)"
+            value={email}
+            onChangeText={setEmail}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Text style={[theme.typography.caption, { marginTop: -8, marginBottom: theme.spacing.m, fontStyle: 'italic' }]}>
+            Se inserisci l{"'"}email, gli verra` inviato un invito a registrarsi su OnCallendar (una sola volta).
+          </Text>
 
           {error ? (
             <View style={{

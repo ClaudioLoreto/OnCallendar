@@ -174,8 +174,11 @@ public class ExternalDoctorConfiguration : IEntityTypeConfiguration<ExternalDoct
         b.Property(x => x.LastName).IsRequired().HasMaxLength(80);
         b.Property(x => x.NormalizedKey).IsRequired().HasMaxLength(170);
         b.Property(x => x.Phone).HasMaxLength(40);
+        b.Property(x => x.Email).HasMaxLength(256);
+        b.Property(x => x.InviteToken).HasMaxLength(128);
         b.Property(x => x.Notes).HasMaxLength(500);
         b.Ignore(x => x.FullName);
+        b.HasIndex(x => x.InviteToken).IsUnique().HasFilter("\"InviteToken\" IS NOT NULL");
 
         b.HasOne(x => x.Tenant)
             .WithMany()
@@ -187,5 +190,69 @@ public class ExternalDoctorConfiguration : IEntityTypeConfiguration<ExternalDoct
         // successivi.
         b.HasIndex(x => new { x.TenantId, x.NormalizedKey }).IsUnique();
         b.HasIndex(x => new { x.TenantId, x.LastName });
+    }
+}
+
+public class NotificationConfiguration : IEntityTypeConfiguration<Notification>
+{
+    public void Configure(EntityTypeBuilder<Notification> b)
+    {
+        b.ToTable("Notifications");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Type).IsRequired().HasMaxLength(50);
+        b.Property(x => x.Title).HasMaxLength(200);
+        b.Property(x => x.Message).IsRequired().HasMaxLength(1000);
+        b.Property(x => x.Category).HasMaxLength(20);
+        // DataJson: nvarchar(max) / text — provider agnostic.
+        b.Property(x => x.DataJson);
+
+        b.HasOne(x => x.User)
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        b.HasIndex(x => new { x.UserId, x.IsRead, x.CreatedAtUtc });
+        b.HasIndex(x => new { x.TenantId, x.Type });
+    }
+}
+
+public class NotificationPreferenceConfiguration : IEntityTypeConfiguration<NotificationPreference>
+{
+    public void Configure(EntityTypeBuilder<NotificationPreference> b)
+    {
+        b.ToTable("NotificationPreferences");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Type).IsRequired().HasMaxLength(50);
+        b.Property(x => x.Channel).IsRequired().HasMaxLength(16);
+
+        b.HasOne(x => x.User)
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Una sola riga per (utente, evento, canale).
+        b.HasIndex(x => new { x.UserId, x.Type, x.Channel }).IsUnique();
+    }
+}
+
+public class UserDeviceTokenConfiguration : IEntityTypeConfiguration<UserDeviceToken>
+{
+    public void Configure(EntityTypeBuilder<UserDeviceToken> b)
+    {
+        b.ToTable("UserDeviceTokens");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Token).IsRequired().HasMaxLength(256);
+        b.Property(x => x.Platform).IsRequired().HasMaxLength(16);
+        b.Property(x => x.DeviceName).HasMaxLength(120);
+
+        b.HasOne(x => x.User)
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Stesso device si registra più volte: il token Expo è univoco per
+        // device, quindi su (UserId, Token) garantisce idempotenza.
+        b.HasIndex(x => new { x.UserId, x.Token }).IsUnique();
+        b.HasIndex(x => x.Token);
     }
 }

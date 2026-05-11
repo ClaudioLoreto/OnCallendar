@@ -36,10 +36,10 @@ public static class DbSeeder
     /// </summary>
     public static readonly (int Number, string Badge, string Email, string Password, string First, string Last)[] Medici =
     {
-        (1, "M01", "superboy23+alessandro@gmail.com", "Medico#2026!", "Alessandro", "Marturano"),
-        (2, "M02", "superboy23+emanuele@gmail.com",   "Medico#2026!", "Emanuele",   "Du Marteau"),
-        (3, "M03", "superboy23+edoardo@gmail.com",    "Medico#2026!", "Edoardo",    "Luci"),
-        (4, "M04", "superboy23+claudia@gmail.com",    "Medico#2026!", "Claudia",    "Ioannucci"),
+        (1, "M01", "medico1@navelli.local", "Medico#2026!", "Alessandro", "Marturano"),
+        (2, "M02", "medico2@navelli.local", "Medico#2026!", "Emanuele",   "Du Marteau"),
+        (3, "M03", "medico3@navelli.local", "Medico#2026!", "Edoardo",    "Luci"),
+        (4, "M04", "medico4@navelli.local", "Medico#2026!", "Claudia",    "Ioannucci"),
     };
 
     public static async Task SeedAsync(
@@ -118,6 +118,30 @@ public static class DbSeeder
         }
 
         // 4 Medici di Navelli
+        // Step 0: migra utenti seed vecchi (formato superboy23+nome@gmail.com) ai
+        // nuovi indirizzi medicoN@navelli.local. Solo se il nuovo non esiste ancora.
+        var legacyMap = new (string Old, string New)[]
+        {
+            ("superboy23+alessandro@gmail.com", "medico1@navelli.local"),
+            ("superboy23+emanuele@gmail.com",   "medico2@navelli.local"),
+            ("superboy23+edoardo@gmail.com",    "medico3@navelli.local"),
+            ("superboy23+claudia@gmail.com",    "medico4@navelli.local"),
+        };
+        foreach (var (oldEmail, newEmail) in legacyMap)
+        {
+            var legacy = await userManager.FindByEmailAsync(oldEmail);
+            if (legacy is null) continue;
+            var alreadyNew = await userManager.FindByEmailAsync(newEmail);
+            if (alreadyNew is not null) continue; // qualcuno ha già il nuovo, lascio stare
+            legacy.UserName = newEmail;
+            legacy.Email = newEmail;
+            legacy.NormalizedUserName = userManager.NormalizeName(newEmail);
+            legacy.NormalizedEmail = userManager.NormalizeEmail(newEmail);
+            legacy.EmailConfirmed = false;
+            legacy.IsDefaultEmail = true;
+            await userManager.UpdateAsync(legacy);
+        }
+
         // Step 1: crea quelli che non esistono ancora.
         foreach (var (number, badge, email, password, first, last) in Medici)
         {
@@ -128,7 +152,8 @@ public static class DbSeeder
                 {
                     UserName = email,
                     Email = email,
-                    EmailConfirmed = true,
+                    EmailConfirmed = false,
+                    IsDefaultEmail = true,
                     FirstName = first,
                     LastName = last,
                     Role = UserRole.Medico,

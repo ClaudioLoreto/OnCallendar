@@ -23,6 +23,21 @@ public class ExternalDoctor : BaseEntity, ITenantScoped
     /// <summary>Telefono di contatto facoltativo (per uso futuro).</summary>
     public string? Phone { get; set; }
 
+    /// <summary>Email di contatto facoltativa, usata per inviare l'invito a registrarsi nell'app.</summary>
+    public string? Email { get; set; }
+
+    /// <summary>Token monouso per completare la registrazione tramite deep-link.</summary>
+    public string? InviteToken { get; set; }
+
+    /// <summary>Data UTC dell'ultimo invio dell'email di invito.</summary>
+    public DateTime? InviteSentAtUtc { get; set; }
+
+    /// <summary>Data UTC in cui il medico esterno ha completato la registrazione.</summary>
+    public DateTime? RegisteredAtUtc { get; set; }
+
+    /// <summary>FK opzionale all'utente applicativo creato dopo la registrazione.</summary>
+    public Guid? LinkedUserId { get; set; }
+
     /// <summary>Note libere facoltative.</summary>
     public string? Notes { get; set; }
 

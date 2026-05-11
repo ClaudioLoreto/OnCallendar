@@ -287,6 +287,111 @@ export const Field: React.FC<{ label?: string; readonly?: boolean } & TextInputP
   );
 };
 
+// ---------- Themed Password TextInput (con toggle occhio) ----------
+export const PasswordField: React.FC<{ label?: string } & Omit<TextInputProps, 'secureTextEntry'>> = ({ label, style, ...rest }) => {
+  const { theme } = useTheme();
+  const [visible, setVisible] = React.useState(false);
+  return (
+    <View style={{ marginBottom: theme.spacing.m }}>
+      {label ? (
+        <Text style={[theme.typography.caption, { marginBottom: 4, color: theme.colors.textSecondary }]}>{label}</Text>
+      ) : null}
+      <View style={{
+        flexDirection: 'row', alignItems: 'center',
+        borderWidth: 1, borderColor: theme.colors.border, borderRadius: theme.radius.m,
+        backgroundColor: theme.colors.surface,
+      }}>
+        <TextInput
+          placeholderTextColor={theme.colors.textMuted}
+          secureTextEntry={!visible}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={[
+            { flex: 1, paddingHorizontal: theme.spacing.m, paddingVertical: 12, fontSize: 16, color: theme.colors.textPrimary },
+            style as any,
+          ]}
+          {...rest}
+        />
+        <TouchableOpacity
+          onPress={() => setVisible(v => !v)}
+          hitSlop={10}
+          style={{ paddingHorizontal: 12, paddingVertical: 12 }}
+          accessibilityRole="button"
+          accessibilityLabel={visible ? 'Nascondi password' : 'Mostra password'}
+        >
+          <Ionicons name={visible ? 'eye-off-outline' : 'eye-outline'} size={20} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+};
+
+// ---------- ConfirmModal: alert custom in tema con app ----------
+export const ConfirmModal: React.FC<{
+  visible: boolean;
+  title: string;
+  message?: string;
+  icon?: IconName;
+  tone?: 'default' | 'success' | 'warning' | 'danger';
+  confirmLabel?: string;
+  cancelLabel?: string;
+  onConfirm?: () => void;
+  onClose: () => void;
+}> = ({ visible, title, message, icon, tone = 'default', confirmLabel, cancelLabel, onConfirm, onClose }) => {
+  const { theme } = useTheme();
+  const accent =
+    tone === 'success' ? theme.colors.success :
+    tone === 'warning' ? theme.colors.warning :
+    tone === 'danger'  ? theme.colors.danger  :
+    theme.colors.primary;
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable
+        onPress={onClose}
+        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 24 }}
+      >
+        <Pressable onPress={() => {}} style={{
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.l ?? 16,
+          padding: 22,
+          alignItems: 'center',
+          shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 12,
+        }}>
+          {icon ? (
+            <View style={{
+              width: 56, height: 56, borderRadius: 28,
+              backgroundColor: accent + '22',
+              alignItems: 'center', justifyContent: 'center',
+              marginBottom: 14,
+            }}>
+              <Ionicons name={icon} size={30} color={accent} />
+            </View>
+          ) : null}
+          <Text style={[theme.typography.h2, { textAlign: 'center', marginBottom: 6 }]}>{title}</Text>
+          {message ? (
+            <Text style={[theme.typography.body, { textAlign: 'center', color: theme.colors.textSecondary, marginBottom: 18 }]}>
+              {message}
+            </Text>
+          ) : null}
+          <View style={{ flexDirection: 'row', gap: 10, alignSelf: 'stretch', marginTop: 4 }}>
+            {onConfirm ? (
+              <View style={{ flex: 1 }}>
+                <Button title={cancelLabel ?? 'Annulla'} variant="subtle" onPress={onClose} />
+              </View>
+            ) : null}
+            <View style={{ flex: 1 }}>
+              <Button
+                title={confirmLabel ?? 'OK'}
+                onPress={() => { (onConfirm ?? onClose)(); }}
+              />
+            </View>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+};
+
 // ---------- Read-only labeled value ----------
 export const ReadValue: React.FC<{ label: string; value?: string | null; icon?: IconName }> = ({ label, value, icon }) => {
   const { theme } = useTheme();

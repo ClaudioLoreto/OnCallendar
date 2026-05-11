@@ -29,12 +29,22 @@ public sealed class BoardController : ControllerBase
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
 
-        var nowUtc = DateTime.UtcNow;
+        // Filtro mese corrente (Europe/Rome): in bacheca compaiono solo i turni
+        // ancora futuri E che cadono entro la fine del mese in corso.
+        var now = DateTime.UtcNow;
+        TimeZoneInfo rome;
+        try { rome = TimeZoneInfo.FindSystemTimeZoneById("Europe/Rome"); }
+        catch { try { rome = TimeZoneInfo.FindSystemTimeZoneById("Europe/Berlin"); } catch { rome = TimeZoneInfo.Utc; } }
+        var nowLocal = TimeZoneInfo.ConvertTimeFromUtc(now, rome);
+        var monthEndLocal = new DateOnly(nowLocal.Year, nowLocal.Month, DateTime.DaysInMonth(nowLocal.Year, nowLocal.Month));
+
         var items = await _db.Shifts
             .Include(s => s.MedicoTurno)
             .Include(s => s.MedicoReperibile)
             .Include(s => s.ExternalDoctor)
-            .Where(s => s.Status == ShiftStatus.OnBoard && s.StartUtc > nowUtc)
+            .Where(s => s.Status == ShiftStatus.OnBoard
+                        && s.StartUtc > now
+                        && s.Date <= monthEndLocal)
             .OrderBy(s => s.StartUtc)
             .ToListAsync();
 
