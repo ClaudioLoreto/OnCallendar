@@ -89,7 +89,8 @@ export const apiClient: AxiosInstance = axios.create({
     Accept: 'application/json',
     // bypass localtunnel reminder page when tunneling backend in dev
     'bypass-tunnel-reminder': 'true',
-    'User-Agent': 'OnCallendarMobile',
+    // User-Agent: solo su native (i browser bloccano l'header → errore in console)
+    ...(Platform.OS !== 'web' ? { 'User-Agent': 'OnCallendarMobile' } : {}),
   },
 });
 
