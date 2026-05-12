@@ -178,6 +178,8 @@ export const AuthApi = {
     apiClient.post('/api/auth/register-external', { token, email, password }).then(r => r.data),
   confirmEmailChange: (token: string) =>
     apiClient.post<{ ok: boolean; email: string }>('/api/auth/confirm-email-change', { token }).then(r => r.data),
+  devResetPassword: (email: string, newPassword: string) =>
+    apiClient.post('/api/auth/dev-reset-password', { email, newPassword }).then(r => r.data),
 };
 
 export const ShiftsApi = {
@@ -237,6 +239,8 @@ export const UsersApi = {
     apiClient.post<{ ok: boolean; pendingEmail: string }>('/api/users/me/request-email-change', { newEmail, clientCallbackUrl }).then(r => r.data),
   devExpirePassword: () =>
     apiClient.post('/api/users/me/dev-expire-password').then(r => r.data),
+  devConfirmEmail: () =>
+    apiClient.post<{ ok: boolean; email: string }>('/api/users/me/dev-confirm-email').then(r => r.data),
   uploadAvatar: async (uri: string) => {
     const fd = new FormData();
     const ext = (uri.split('.').pop() || 'jpg').toLowerCase();

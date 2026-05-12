@@ -64,8 +64,7 @@ export default function PasswordExpiredScreen({ onPasswordChanged }: Props) {
       </View>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 96 : 24}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
           contentContainerStyle={{ padding: theme.spacing.l, paddingTop: theme.spacing.m, paddingBottom: theme.spacing.xxl * 3 }}

@@ -222,7 +222,10 @@ public sealed class UsersController : ControllerBase
         // del backend fa il redirect immediato all'app reale.
         // Risolto via PublicRedirectBaseUrl => Railway anche se siamo in DEV.
         var publicBackend = EmailTemplates.ResolvePublicRedirectBaseUrl(_mail, $"{Request.Scheme}://{Request.Host.Value}");
-        var ctaUrl = EmailTemplates.WrapForEmail(url, publicBackend);
+        // Per conferma email usiamo SEMPRE l'endpoint server-side /r/confirm-email
+        // che conferma direttamente nel browser. Questo evita problemi con i deep
+        // link temporanei (Expo tunnel, scheme custom non cliccabili, ecc.).
+        var ctaUrl = $"{publicBackend}/r/confirm-email?token={u.EmailChangeToken}";
 
         var html = EmailTemplates.Build(
             preheader: $"Conferma il nuovo indirizzo email {newEmail}.",
@@ -279,5 +282,55 @@ public sealed class UsersController : ControllerBase
         await _users.UpdateAsync(u);
         _audit.Log("ApplicationUser", u.Id, "DevExpiredPassword", u.TenantId ?? Guid.Empty);
         return Ok(new { ok = true, passwordChangedAtUtc = u.PasswordChangedAtUtc });
+    }
+
+    /// <summary>
+    /// DEV ONLY: conferma la pending email dell'utente corrente senza passare
+    /// dall'email. Utile quando si testa con Expo Go (tunnel mode) dove il link
+    /// nell'email non è raggiungibile perché punta al backend di produzione ma
+    /// il token è nel database locale.
+    /// </summary>
+    [HttpPost("me/dev-confirm-email")]
+    [Authorize]
+    public async Task<IActionResult> DevConfirmEmail()
+    {
+        if (!_env.IsDevelopment())
+            return NotFound();
+
+        if (_user.UserId is not Guid uid) return Unauthorized();
+        var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == uid);
+        if (u is null) return NotFound();
+        if (u.PendingEmail is null)
+            return BadRequest(new { error = "Nessun cambio email in sospeso." });
+
+        var pending = u.PendingEmail!;
+        var clash = await _db.Users.FirstOrDefaultAsync(x =>
+            x.Id != u.Id && x.Email != null && x.Email.ToLower() == pending.ToLower());
+        if (clash is not null)
+        {
+            u.PendingEmail = null;
+            u.EmailChangeToken = null;
+            u.EmailChangeRequestedAtUtc = null;
+            await _db.SaveChangesAsync();
+            return Conflict(new { error = "Email già registrata per un altro utente." });
+        }
+
+        var setEmail = await _users.SetEmailAsync(u, pending);
+        if (!setEmail.Succeeded)
+            return BadRequest(new { error = string.Join(", ", setEmail.Errors.Select(e => e.Description)) });
+        var setUser = await _users.SetUserNameAsync(u, pending);
+        if (!setUser.Succeeded)
+            return BadRequest(new { error = string.Join(", ", setUser.Errors.Select(e => e.Description)) });
+
+        u.EmailConfirmed = true;
+        u.IsDefaultEmail = false;
+        u.PendingEmail = null;
+        u.EmailChangeToken = null;
+        u.EmailChangeRequestedAtUtc = null;
+        u.UpdatedAtUtc = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        _audit.Log("ApplicationUser", u.Id, "DevConfirmedEmail", u.TenantId ?? Guid.Empty);
+        return Ok(new { ok = true, email = pending });
     }
 }

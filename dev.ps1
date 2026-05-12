@@ -113,6 +113,15 @@ function Start-Expo {
 function Apply-Migrations {
     Write-Host ""
     Write-Host "  Migrations DB locale..." -ForegroundColor Cyan
+
+    # Ferma il backend se in esecuzione (blocca i file DLL)
+    $dotnetProc = Get-Process dotnet -ErrorAction SilentlyContinue
+    if ($dotnetProc) {
+        Write-Host "  Fermo il backend per sbloccare i file..." -ForegroundColor Yellow
+        Stop-Process -Name dotnet -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+    }
+
     $env:DATABASE_URL_DESIGN = "Host=localhost;Port=5433;Database=oncallendar_dev;Username=oncallendar;Password=dev_only_password"
     Set-Location $backend
     dotnet ef database update `
@@ -332,18 +341,61 @@ function Migrate-Railway {
         return
     }
     $confirm = Read-Host "  Sei sicuro? Scrivi SI per confermare"
-    if ($confirm -ne "SI") {
+    if ($confirm -notmatch '^[Ss][Ii]$') {
         Write-Host "  Annullato." -ForegroundColor DarkGray
         Wait-Key
         return
     }
-    $env:DATABASE_URL_DESIGN = $railwayUrl
+
+    # Converti URL Railway (postgresql://user:pass@host:port/db) in ADO.NET
+    $connString = $railwayUrl
+    if ($railwayUrl -match '^postgres(?:ql)?://([^:]+):([^@]+)@([^:/]+):(\d+)/(.+)$') {
+        $user = $Matches[1]
+        $pass = $Matches[2]
+        $pgHost = $Matches[3]
+        $port = $Matches[4]
+        $db   = $Matches[5]
+        $connString = "Host=$pgHost;Port=$port;Database=$db;Username=$user;Password=$pass;SSL Mode=Require;Trust Server Certificate=true"
+        Write-Host "  Connection string convertita:" -ForegroundColor Green
+        Write-Host "    Host=$pgHost Port=$port DB=$db User=$user" -ForegroundColor DarkGray
+    } elseif ($railwayUrl -match '^postgres') {
+        Write-Host "  ERRORE: formato URL non riconosciuto." -ForegroundColor Red
+        Write-Host "  Formato atteso: postgresql://user:pass@host:port/db" -ForegroundColor Yellow
+        Wait-Key
+        return
+    }
+
+    # Ferma il backend se in esecuzione (blocca i file DLL)
+    $dotnetProc = Get-Process dotnet -ErrorAction SilentlyContinue
+    $wasRunning = $false
+    if ($dotnetProc) {
+        Write-Host "  Fermo il backend per sbloccare i file..." -ForegroundColor Yellow
+        Stop-Process -Name dotnet -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+        $wasRunning = $true
+    }
+
+    $env:DATABASE_URL_DESIGN = $connString
+    Write-Host "  Build..." -ForegroundColor Cyan
     Set-Location $backend
+    dotnet build src/OnCallendar.Api/OnCallendar.Api.csproj
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  Build failed. Correggi gli errori prima di migrare." -ForegroundColor Red
+        Set-Location $root
+        Wait-Key
+        return
+    }
+    Write-Host "  Build OK. Applico migrations..." -ForegroundColor Cyan
     dotnet ef database update `
         --project src/OnCallendar.Infrastructure `
-        --startup-project src/OnCallendar.Api
+        --startup-project src/OnCallendar.Api `
+        --no-build
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  Migrations produzione applicate." -ForegroundColor Green
+    } else {
+        Write-Host "  ERRORE durante la migrazione." -ForegroundColor Red
+    }
     Set-Location $root
-    Write-Host "  Migrations produzione applicate." -ForegroundColor Green
     Wait-Key
 }
 

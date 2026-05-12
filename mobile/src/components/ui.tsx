@@ -6,6 +6,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -227,7 +228,7 @@ export const Sheet: React.FC<{
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior="padding"
         style={{ flex: 1 }}
       >
         <Pressable
@@ -252,7 +253,9 @@ export const Sheet: React.FC<{
             {title ? (
               <Text style={[theme.typography.h2, { marginBottom: theme.spacing.m }]}>{title}</Text>
             ) : null}
-            {children}
+            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              {children}
+            </ScrollView>
           </Pressable>
         </Pressable>
       </KeyboardAvoidingView>

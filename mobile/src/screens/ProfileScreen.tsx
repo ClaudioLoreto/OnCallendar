@@ -150,33 +150,17 @@ export default function ProfileScreen({ navigation }: Props) {
   };
 
   const pickAvatar = async () => {
-    // Pre-prompt brandizzato: spieghiamo prima a cosa serve l'accesso, poi
-    // chiediamo il permesso di sistema (iOS/Android mostreranno il proprio
-    // dialog con il testo configurato in app.json -> infoPlist / plugins).
-    // Nota: in Expo Go iOS mostra ANCHE un dialog generico "Experience needs
-    // permissions" che e` parte di Expo Go stesso e non si puo` rimuovere; in
-    // una build standalone (EAS) appare solo il nostro testo nativo localizzato.
-    const already = await ImagePicker.getMediaLibraryPermissionsAsync();
-    if (!already.granted) {
-      const proceed = await new Promise<boolean>(resolve => {
-        setPopup({
-          title: 'Foto profilo',
-          message: 'Per cambiare avatar OnCallendar deve poter leggere una foto dalla tua galleria. Concedi il permesso quando il sistema te lo chiede.',
-          tone: 'default',
-          icon: 'image-outline',
-          confirmLabel: 'Continua',
-          cancelLabel: 'Annulla',
-          onConfirm: () => resolve(true),
-        });
-        // Se l'utente chiude (X / fuori), risolvi false.
-        setTimeout(() => resolve(false), 30_000);
+    // Chiedi sempre il permesso PRIMA di aprire il picker, così il dialog
+    // di sistema appare per primo e l'utente sa cosa sta autorizzando.
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      setPopup({
+        title: 'Permesso negato',
+        message: "Senza accesso alla galleria non posso cambiare l'avatar. Puoi abilitarlo dalle Impostazioni del telefono.",
+        tone: 'warning',
+        icon: 'image-outline',
       });
-      if (!proceed) return;
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) {
-        setPopup({ title: 'Permesso negato', message: "Senza accesso alla galleria non posso cambiare l'avatar. Puoi abilitarlo dalle Impostazioni del telefono.", tone: 'warning', icon: 'image-outline' });
-        return;
-      }
+      return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -229,8 +213,7 @@ export default function ProfileScreen({ navigation }: Props) {
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 96 : 24}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
       <ScrollView
         contentContainerStyle={{ padding: theme.spacing.l, paddingBottom: theme.spacing.xxl * 3 }}
@@ -417,7 +400,8 @@ export default function ProfileScreen({ navigation }: Props) {
             onPress={() => navigation.navigate('NotificationPreferences')} />
         </Card>
 
-        {/* DEV: scadenza password (sempre visibile) */}
+        {/* DEV: scadenza password — nascosto in produzione, tenere il codice per test futuri */}
+        {false && (
         <Card>
           <Text style={[theme.typography.h3, { marginBottom: theme.spacing.s }]}>Strumenti sviluppatore</Text>
           <Text style={[theme.typography.caption, { marginBottom: theme.spacing.m }]}>
@@ -430,6 +414,7 @@ export default function ProfileScreen({ navigation }: Props) {
             onPress={onDevExpire}
           />
         </Card>
+        )}
 
         <Card>
           <Button title={t('profile.logout')} variant="danger" icon="log-out-outline" onPress={onLogout} />

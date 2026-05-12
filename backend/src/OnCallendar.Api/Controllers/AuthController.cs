@@ -26,6 +26,7 @@ public sealed class AuthController : ControllerBase
     private readonly ApplicationDbContext _db;
     private readonly IEmailSender _email;
     private readonly MailSettings _mail;
+    private readonly IWebHostEnvironment _env;
     private readonly ILogger<AuthController> _logger;
 
     public AuthController(
@@ -35,6 +36,7 @@ public sealed class AuthController : ControllerBase
         ApplicationDbContext db,
         IEmailSender email,
         IOptions<MailSettings> mailOpt,
+        IWebHostEnvironment env,
         ILogger<AuthController> logger)
     {
         _users = users;
@@ -43,6 +45,7 @@ public sealed class AuthController : ControllerBase
         _db = db;
         _email = email;
         _mail = mailOpt.Value;
+        _env = env;
         _logger = logger;
     }
 
@@ -393,5 +396,42 @@ public sealed class AuthController : ControllerBase
 
         _logger.LogInformation("[Auth/ConfirmEmailChange] Email confermata per utente {UserId}: {Email}", u.Id, pending);
         return Ok(new { ok = true, email = pending });
+    }
+
+    public sealed record DevResetPasswordRequest(string Email, string NewPassword);
+
+    /// <summary>
+    /// DEV ONLY: resetta la password di un utente senza token email.
+    /// Utile per testare il flusso "forgot password" da Expo Go dove il link
+    /// nell'email punta al backend di produzione (che ha un DB diverso).
+    /// </summary>
+    [HttpPost("dev-reset-password")]
+    [AllowAnonymous]
+    public async Task<IActionResult> DevResetPassword([FromBody] DevResetPasswordRequest req)
+    {
+        if (!_env.IsDevelopment())
+            return NotFound();
+
+        if (req is null || string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.NewPassword))
+            return BadRequest(new { error = "Email e nuova password obbligatorie." });
+
+        var user = await _users.FindByEmailAsync(req.Email.Trim());
+        if (user is null || !user.IsActive)
+            return NotFound(new { error = "Nessun account associato a questa email." });
+
+        // Vieta nuova password identica a quella attuale.
+        if (await _users.CheckPasswordAsync(user, req.NewPassword))
+            return BadRequest(new { error = "La nuova password deve essere diversa da quella attuale." });
+
+        var rawToken = await _users.GeneratePasswordResetTokenAsync(user);
+        var res = await _users.ResetPasswordAsync(user, rawToken, req.NewPassword);
+        if (!res.Succeeded)
+            return BadRequest(new { error = string.Join(" ", res.Errors.Select(e => e.Description)) });
+
+        user.PasswordChangedAtUtc = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        _logger.LogInformation("[Auth/DevResetPassword] Password reimpostata (DEV) per {Email}", req.Email);
+        return Ok(new { ok = true });
     }
 }

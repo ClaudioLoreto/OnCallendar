@@ -6,6 +6,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { useNotifications } from '../auth/NotificationsContext';
 import { UsersApi } from '../api/endpoints';
 import { buildCallbackUrl } from '../api/callbackUrl';
+import { PasswordRules, isPasswordStrong } from './ResetPasswordScreen';
 
 type Props = { navigation: any };
 
@@ -14,7 +15,7 @@ type Props = { navigation: any };
  * Tutte le notifiche di tipo info → primary, le positive → success, le attese → warning,
  * le bloccanti / errori → danger. Niente colori arbitrari.
  */
-type Tone = 'primary' | 'success' | 'warning' | 'danger';
+type Tone = 'primary' | 'secondary' | 'success' | 'warning' | 'danger';
 
 function notifTone(type: string): { tone: Tone; icon: string; label: string } {
   switch (type) {
@@ -117,7 +118,7 @@ export default function NotificationsScreen({ navigation }: Props) {
       list.push({
         id: 'pending-email',
         icon: 'mail-outline',
-        tone: 'warning',
+        tone: 'secondary',
         title: 'Email in attesa di conferma',
         message: `Apri ${me.pendingEmail} e clicca il link che ti abbiamo inviato. Tocca qui per cambiare indirizzo o rispedire l'email.`,
         onPress: () => { setNewEmail(me.pendingEmail ?? ''); setPendingSheetOpen(true); },
@@ -126,7 +127,7 @@ export default function NotificationsScreen({ navigation }: Props) {
       list.push({
         id: 'default-email',
         icon: 'mail-unread-outline',
-        tone: 'danger',
+        tone: 'secondary',
         title: 'Email di default',
         message: `Stai usando ${me.email}. Imposta la tua email reale per ricevere notifiche e poter recuperare la password.`,
         onPress: () => { setNewEmail(''); setPendingSheetOpen(true); },
@@ -137,7 +138,7 @@ export default function NotificationsScreen({ navigation }: Props) {
       list.push({
         id: 'pwd-required',
         icon: 'shield-half-outline',
-        tone: 'danger',
+        tone: 'secondary',
         title: 'Password mai cambiata',
         message: 'Per sicurezza imposta una tua password personale. Tocca qui per farlo subito.',
         onPress: () => setPwdSheetOpen(true),
@@ -146,7 +147,7 @@ export default function NotificationsScreen({ navigation }: Props) {
       list.push({
         id: 'pwd-expired',
         icon: 'time-outline',
-        tone: 'warning',
+        tone: 'secondary',
         title: 'Password scaduta',
         message: 'Sono passati più di 12 mesi dall\'ultimo cambio. Tocca qui per cambiarla.',
         onPress: () => setPwdSheetOpen(true),
@@ -189,16 +190,12 @@ export default function NotificationsScreen({ navigation }: Props) {
     }
   };
 
+  const pwdStrong = useMemo(() => isPasswordStrong(newPwd), [newPwd]);
+  const pwdCanSubmit = oldPwd.length > 0 && pwdStrong && newPwd === newPwd2 && oldPwd !== newPwd;
+
   // --- Submit cambio password ---
   const submitPwd = async () => {
-    if (!oldPwd || !newPwd || newPwd !== newPwd2 || newPwd.length < 8) {
-      setPopup({ title: 'Dati non validi', message: 'Verifica i campi: password attuale richiesta, nuova min. 8 caratteri e conferma uguale.', tone: 'warning', icon: 'alert-circle-outline' });
-      return;
-    }
-    if (oldPwd === newPwd) {
-      setPopup({ title: 'Password non valida', message: 'La nuova password deve essere diversa da quella attuale.', tone: 'warning', icon: 'alert-circle-outline' });
-      return;
-    }
+    if (!pwdCanSubmit) return;
     setBusy(true);
     try {
       await UsersApi.changePassword(oldPwd, newPwd);
@@ -208,6 +205,30 @@ export default function NotificationsScreen({ navigation }: Props) {
       setPopup({ title: 'Password aggiornata', tone: 'success', icon: 'shield-checkmark-outline' });
     } catch (e: any) {
       setPopup({ title: 'Errore', message: e?.response?.data?.errors?.join(' ') ?? e?.response?.data?.error ?? 'Cambio non riuscito.', tone: 'danger', icon: 'alert-circle-outline' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // --- DEV: conferma email senza passare dall'email (solo in sviluppo) ---
+  const devConfirmEmail = async () => {
+    setBusy(true);
+    try {
+      const r = await UsersApi.devConfirmEmail();
+      refreshMe();
+      setPopup({
+        title: 'Email confermata (DEV)',
+        message: `L'indirizzo ${r.email} è stato attivato direttamente.`,
+        tone: 'success',
+        icon: 'checkmark-circle-outline',
+      });
+    } catch (e: any) {
+      setPopup({
+        title: 'Errore',
+        message: e?.response?.data?.error ?? 'Conferma non riuscita.',
+        tone: 'danger',
+        icon: 'alert-circle-outline',
+      });
     } finally {
       setBusy(false);
     }
@@ -242,6 +263,23 @@ export default function NotificationsScreen({ navigation }: Props) {
             <View style={{ flex: 1 }}>
               <Text style={{ color: tt.color, fontWeight: '700', marginBottom: 2 }}>{a.title}</Text>
               <Text style={{ color: theme.colors.textPrimary, lineHeight: 19 }}>{a.message}</Text>
+              {__DEV__ && a.id === 'pending-email' ? (
+                <TouchableOpacity
+                  onPress={devConfirmEmail}
+                  disabled={busy}
+                  style={{
+                    marginTop: 8,
+                    backgroundColor: theme.colors.primary,
+                    borderRadius: theme.radius.m,
+                    paddingVertical: 6, paddingHorizontal: 12,
+                    alignSelf: 'flex-start',
+                  }}
+                >
+                  <Text style={{ color: theme.colors.white, fontWeight: '600', fontSize: 13 }}>
+                    Conferma subito (DEV)
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           </TouchableOpacity>
         );
@@ -262,7 +300,9 @@ export default function NotificationsScreen({ navigation }: Props) {
         ) : null}
         renderItem={({ item }) => {
           const cfg = notifTone(item.type);
-          const tt = tinted(cfg.tone);
+          // Colori fissi per stato lettura (palette unificata)
+          const itemColor = item.isRead ? theme.colors.textMuted : theme.colors.primary;
+          const itemBg = item.isRead ? theme.colors.surfaceAlt : itemColor + '14';
           const cat = (item.category || '').toLowerCase();
           const isSwap = (cat === 'swap' || item.type.startsWith('Swap') || item.type.startsWith('CounterOffer')) && !!item.relatedEntityId;
           const isShift = cat === 'shift' || cat === 'reminder';
@@ -283,9 +323,9 @@ export default function NotificationsScreen({ navigation }: Props) {
               disabled={!tappable}
               style={{
                 flexDirection: 'row', alignItems: 'flex-start', gap: 12,
-                backgroundColor: item.isRead ? theme.colors.surface : tt.bg,
+                backgroundColor: itemBg,
                 borderLeftWidth: item.isRead ? 0 : 4,
-                borderLeftColor: tt.color,
+                borderLeftColor: itemColor,
                 borderRadius: theme.radius.l,
                 padding: theme.spacing.m,
                 marginBottom: theme.spacing.s,
@@ -293,13 +333,13 @@ export default function NotificationsScreen({ navigation }: Props) {
               }}>
               <View style={{
                 width: 38, height: 38, borderRadius: 19,
-                backgroundColor: tt.color + '22',
+                backgroundColor: itemColor + '22',
                 alignItems: 'center', justifyContent: 'center',
               }}>
-                <Ionicons name={cfg.icon as any} size={20} color={tt.color} />
+                <Ionicons name={cfg.icon as any} size={20} color={itemColor} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[theme.typography.caption, { color: tt.color, fontWeight: '700', marginBottom: 2 }]}>
+                <Text style={[theme.typography.caption, { color: itemColor, fontWeight: '700', marginBottom: 2 }]}>
                   {item.title ?? cfg.label}
                 </Text>
                 <Text style={[theme.typography.body, { lineHeight: 20 }]}>{item.message}</Text>
@@ -308,7 +348,7 @@ export default function NotificationsScreen({ navigation }: Props) {
               {!item.isRead ? (
                 <View style={{
                   width: 8, height: 8, borderRadius: 4,
-                  backgroundColor: tt.color, marginTop: 5,
+                  backgroundColor: itemColor, marginTop: 5,
                 }} />
               ) : null}
             </TouchableOpacity>
@@ -332,21 +372,28 @@ export default function NotificationsScreen({ navigation }: Props) {
           autoCorrect={false}
         />
         <Button title={me?.pendingEmail && newEmail.trim().toLowerCase() === (me?.pendingEmail ?? '').toLowerCase() ? 'Rinvia link' : 'Invia link di conferma'} icon="send-outline" onPress={submitEmail} loading={busy} />
-        <View style={{ height: theme.spacing.s }} />
-        <Button title="Annulla" variant="subtle" onPress={() => setPendingSheetOpen(false)} />
       </Sheet>
 
-      {/* Sheet cambio password */}
-      <Sheet visible={pwdSheetOpen} onClose={() => setPwdSheetOpen(false)} title="Cambia password">
+      {/* Sheet cambio password (con stesse regole di PasswordExpiredScreen) */}
+      <Sheet visible={pwdSheetOpen} onClose={() => { setPwdSheetOpen(false); setOldPwd(''); setNewPwd(''); setNewPwd2(''); }} title="Cambia password">
         <Text style={[theme.typography.body, { marginBottom: theme.spacing.m }]}>
-          La nuova password deve avere almeno 8 caratteri, una maiuscola, una minuscola, un numero e un simbolo.
+          Imposta una nuova password rispettando i requisiti di sicurezza.
         </Text>
         <PasswordField label="Password attuale" value={oldPwd} onChangeText={setOldPwd} />
         <PasswordField label="Nuova password" value={newPwd} onChangeText={setNewPwd} />
+        {newPwd.length > 0 ? <PasswordRules value={newPwd} /> : null}
+        {newPwd.length > 0 && oldPwd.length > 0 && newPwd === oldPwd ? (
+          <Text style={{ color: theme.colors.danger, marginBottom: theme.spacing.s }}>
+            La nuova password deve essere diversa da quella attuale.
+          </Text>
+        ) : null}
         <PasswordField label="Conferma nuova password" value={newPwd2} onChangeText={setNewPwd2} />
-        <Button title="Aggiorna password" icon="shield-checkmark-outline" onPress={submitPwd} loading={busy} />
-        <View style={{ height: theme.spacing.s }} />
-        <Button title="Annulla" variant="subtle" onPress={() => setPwdSheetOpen(false)} />
+        {newPwd2.length > 0 && newPwd !== newPwd2 ? (
+          <Text style={{ color: theme.colors.danger, marginBottom: theme.spacing.s }}>
+            Le due password non coincidono.
+          </Text>
+        ) : null}
+        <Button title="Aggiorna password" icon="shield-checkmark-outline" onPress={submitPwd} loading={busy} disabled={!pwdCanSubmit} />
       </Sheet>
 
       <ConfirmModal
