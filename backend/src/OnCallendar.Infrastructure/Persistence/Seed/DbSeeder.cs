@@ -120,19 +120,19 @@ public static class DbSeeder
         }
 
         // ── 4 Medici di Navelli ──────────────────────────────────────────
-        // Strategia: PRIMA controlliamo via raw SQL (senza ChangeTracker)
-        // se tutti e 4 i badge esistono già. Se sì, aggiorniamo solo i nomi
-        // via SQL e saltiamo COMPLETAMENTE UserManager, evitando qualsiasi
-        // rischio di conflitto IX_AspNetUsers_Badge dal ChangeTracker.
+        // Strategia: se QUALSIASI badge M01-M04 esiste già nel DB,
+        // siamo in un DB esistente (prod/dev con dati). Solo SQL UPDATE
+        // per aggiornare nomi/numero, ZERO chiamate a UserManager
+        // (evita conflitti IX_AspNetUsers_Badge dal ChangeTracker).
         db.ChangeTracker.Clear();
 
         var existingBadgeCount = await db.Users.IgnoreQueryFilters().AsNoTracking()
             .CountAsync(u => u.Badge != null &&
                 new[] { "M01", "M02", "M03", "M04" }.Contains(u.Badge), ct);
 
-        if (existingBadgeCount >= 4)
+        if (existingBadgeCount > 0)
         {
-            // PROD: tutti i medici esistono. Solo update nomi via SQL puro.
+            // DB esistente: aggiorna nomi via SQL puro (safe, nessun conflitto).
             foreach (var (number, badge, _, _, first, last) in Medici)
             {
                 await db.Database.ExecuteSqlInterpolatedAsync(
@@ -146,9 +146,7 @@ public static class DbSeeder
         }
         else
         {
-            // DB fresco o parziale: serve UserManager per creare utenti.
-            // Wrap in try-catch: se crasha, non è fatale (i medici possono
-            // essere creati manualmente o al prossimo deploy).
+            // DB completamente fresco: serve UserManager per creare utenti.
             try
             {
                 await SeedMediciAsync(db, userManager, tenant.Id, ct);
