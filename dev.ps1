@@ -131,6 +131,64 @@ function Stop-All {
     Wait-Key
 }
 
+function Suggest-CommitMessage {
+    # Costruisce un messaggio commit precompilato a partire dai file modificati,
+    # raggruppati per area logica. Restituisce una stringa multi-riga.
+    $statusLines = git -C $root status --porcelain
+    if (-not $statusLines) { return "" }
+
+    $files = $statusLines | ForEach-Object { ($_ -replace '^...','').Trim() }
+    $by = @{
+        backend  = @($files | Where-Object { $_ -like 'backend/*' })
+        mobile   = @($files | Where-Object { $_ -like 'mobile/*' })
+        web      = @($files | Where-Object { $_ -like 'web/*' })
+        infra    = @($files | Where-Object { $_ -in @('docker-compose.yml','Dockerfile','railway.toml','.dockerignore','.gitignore') -or $_ -like '.github/*' -or $_ -like '*.ps1' })
+        other    = @()
+    }
+    $known = $by.backend + $by.mobile + $by.web + $by.infra
+    $by.other = @($files | Where-Object { $known -notcontains $_ })
+
+    $parts = @()
+    if ($by.backend) { $parts += "backend ($($by.backend.Count))" }
+    if ($by.mobile)  { $parts += "mobile ($($by.mobile.Count))" }
+    if ($by.web)     { $parts += "web ($($by.web.Count))" }
+    if ($by.infra)   { $parts += "infra ($($by.infra.Count))" }
+    if ($by.other)   { $parts += "other ($($by.other.Count))" }
+
+    $title = "chore: update " + ($parts -join ", ")
+
+    $bodyLines = @()
+    foreach ($area in 'backend','mobile','web','infra','other') {
+        $list = $by[$area]
+        if ($list -and $list.Count -gt 0) {
+            $bodyLines += ""
+            $bodyLines += "[$area]"
+            foreach ($f in ($list | Select-Object -First 12)) { $bodyLines += "  - $f" }
+            if ($list.Count -gt 12) { $bodyLines += "  - ... (+$($list.Count - 12) altri)" }
+        }
+    }
+
+    return ($title + "`n" + ($bodyLines -join "`n"))
+}
+
+function Read-CommitMessage([string]$suggested) {
+    # Mostra il suggerimento e permette: invio = usa cosi`, "n" = scrivi da zero,
+    # qualsiasi altra stringa = usa quella riga come commit (single-line).
+    Write-Host ""
+    Write-Host "  Messaggio commit suggerito (in base ai file modificati):" -ForegroundColor Cyan
+    Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
+    foreach ($l in ($suggested -split "`n")) { Write-Host "  $l" -ForegroundColor Gray }
+    Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
+    $resp = Read-Host "  [invio = usa il suggerito] [n = scrivi da zero] [oppure scrivi un messaggio]"
+    if ([string]::IsNullOrWhiteSpace($resp)) { return $suggested }
+    if ($resp -match '^[Nn]$') {
+        $custom = Read-Host "  Messaggio commit (lascia vuoto per annullare)"
+        if ([string]::IsNullOrWhiteSpace($custom)) { return $null }
+        return $custom
+    }
+    return $resp
+}
+
 function Git-Push {
     Write-Host ""
     $currentBranch = git -C $root branch --show-current 2>$null
@@ -148,10 +206,18 @@ function Git-Push {
     Write-Host ""
     git -C $root status --short
     Write-Host ""
-    $msg = Read-Host "  Messaggio commit (invio = solo push senza commit)"
-    if (-not [string]::IsNullOrWhiteSpace($msg)) {
+    $suggested = Suggest-CommitMessage
+    if ($suggested) {
+        $msg = Read-CommitMessage $suggested
+        if ($null -eq $msg) {
+            Write-Host "  Nessun commit, annullato." -ForegroundColor DarkGray
+            Wait-Key
+            return
+        }
         git -C $root add -A
         git -C $root commit -m $msg
+    } else {
+        Write-Host "  Niente di modificato, faccio solo push." -ForegroundColor DarkGray
     }
 
     git -C $root push origin $branch
@@ -162,32 +228,55 @@ function Git-Push {
 function Deploy-Railway {
     Write-Host ""
     Write-Host "  DEPLOY RAILWAY" -ForegroundColor Magenta
-    Write-Host "  Railway deploya automaticamente da main." -ForegroundColor Yellow
+    Write-Host "  Railway deploya automaticamente dal branch di produzione (default: main)." -ForegroundColor Yellow
     Write-Host ""
 
     $currentBranch = git -C $root branch --show-current 2>$null
-    if ($currentBranch -ne "main") {
-        Write-Host "  Sei su '$currentBranch'. Merge su main?" -ForegroundColor Yellow
-        $resp = Read-Host "  [S/n]"
-        if ($resp -notmatch "^[Nn]") {
-            $msg = Read-Host "  Messaggio commit (invio = skip)"
-            if (-not [string]::IsNullOrWhiteSpace($msg)) {
-                git -C $root add -A
-                git -C $root commit -m $msg
-            }
-            git -C $root checkout main
-            git -C $root merge $currentBranch --no-edit
+    Write-Host "  Branch corrente: $currentBranch" -ForegroundColor Cyan
+    Write-Host ""
+    git -C $root branch
+    Write-Host ""
+
+    # Branch di produzione su Railway (di default main, ma potresti averlo cambiato)
+    $prodBranch = Read-Host "  Branch di deploy Railway? [invio = main]"
+    if ([string]::IsNullOrWhiteSpace($prodBranch)) { $prodBranch = "main" }
+
+    Write-Host ""
+    git -C $root status --short
+    Write-Host ""
+
+    # Se ci sono modifiche non committate sul branch corrente, proponi commit prima del merge.
+    $statusLines = git -C $root status --porcelain
+    if ($statusLines) {
+        $suggested = Suggest-CommitMessage
+        $msg = Read-CommitMessage $suggested
+        if ($null -ne $msg) {
+            git -C $root add -A
+            git -C $root commit -m $msg
         }
     }
 
-    $confirm = Read-Host "  Push su main (deploy Railway)? [S/n]"
+    if ($currentBranch -ne $prodBranch) {
+        Write-Host "  Sei su '$currentBranch'. Merge su '$prodBranch'?" -ForegroundColor Yellow
+        $resp = Read-Host "  [S/n]"
+        if ($resp -notmatch "^[Nn]") {
+            git -C $root checkout $prodBranch
+            git -C $root merge $currentBranch --no-edit
+        } else {
+            Write-Host "  Annullato." -ForegroundColor DarkGray
+            Wait-Key
+            return
+        }
+    }
+
+    $confirm = Read-Host "  Push su '$prodBranch' (deploy Railway)? [S/n]"
     if ($confirm -match "^[Nn]") {
         Write-Host "  Annullato." -ForegroundColor DarkGray
         Wait-Key
         return
     }
 
-    git -C $root push origin main
+    git -C $root push origin $prodBranch
     Write-Host "  Push eseguito. Controlla https://railway.app" -ForegroundColor Green
     Wait-Key
 }

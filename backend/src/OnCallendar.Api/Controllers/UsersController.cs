@@ -135,6 +135,10 @@ public sealed class UsersController : ControllerBase
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest req)
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
+        if (req is null || string.IsNullOrWhiteSpace(req.CurrentPassword) || string.IsNullOrWhiteSpace(req.NewPassword))
+            return BadRequest(new { error = "Dati mancanti." });
+        if (string.Equals(req.CurrentPassword, req.NewPassword, StringComparison.Ordinal))
+            return BadRequest(new { errors = new[] { "La nuova password deve essere diversa da quella attuale." } });
         var u = await _users.FindByIdAsync(uid.ToString());
         if (u is null) return NotFound();
         var res = await _users.ChangePasswordAsync(u, req.CurrentPassword, req.NewPassword);
@@ -213,6 +217,11 @@ public sealed class UsersController : ControllerBase
 
         var baseUrl = EmailTemplates.ResolveCallbackBaseUrl(req?.ClientCallbackUrl, _mail);
         var url = $"{baseUrl}/confirm-email?token={u.EmailChangeToken}";
+        // Wrap https per renderlo cliccabile in qualsiasi client mail (Gmail/Outlook
+        // bloccano scheme custom come exp:// o oncallendar://). La pagina /r/go
+        // del backend fa il redirect immediato all'app reale.
+        var publicBackend = $"{Request.Scheme}://{Request.Host.Value}";
+        var ctaUrl = EmailTemplates.WrapForEmail(url, publicBackend);
 
         var html = EmailTemplates.Build(
             preheader: $"Conferma il nuovo indirizzo email {newEmail}.",
@@ -224,9 +233,9 @@ public sealed class UsersController : ControllerBase
                 "Per attivare il nuovo indirizzo conferma cliccando il bottone qui sotto. Il link &egrave; valido per <b>7 giorni</b>.",
             },
             ctaLabel: "Conferma email",
-            ctaUrl: url,
+            ctaUrl: ctaUrl,
             footerNote: "Se non hai richiesto tu il cambio puoi ignorare questa email: il tuo account non subir&agrave; modifiche.");
-        var text = $"Conferma il cambio email aprendo questo link (valido 7 giorni):\n{url}\n\nSe non hai richiesto tu il cambio, ignora questa email.";
+        var text = $"Conferma il cambio email aprendo questo link (valido 7 giorni):\n{ctaUrl}\n\nSe non hai richiesto tu il cambio, ignora questa email.";
         try
         {
             await _email.SendAsync(

@@ -53,8 +53,7 @@ public static class EmailTemplates
                     <a href=""{ctaUrl}"" target=""_blank"" style=""display:inline-block;padding:14px 28px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:8px;"">{HttpUtility.HtmlEncode(ctaLabel)}</a>
                   </td>
                 </tr>
-              </table>
-              <p style=""margin:0 0 14px 0;color:{Muted};font-size:12px;line-height:1.55;"">Se il bottone non funziona, copia e incolla questo link nel browser:<br/><a href=""{ctaUrl}"" style=""color:{Primary};word-break:break-all;"">{ctaUrl}</a></p>"
+              </table>"
             : string.Empty;
 
         var footerHtml = !string.IsNullOrWhiteSpace(footerNote)
@@ -140,5 +139,26 @@ public static class EmailTemplates
         if (!string.IsNullOrWhiteSpace(mail.MobileDeepLinkBaseUrl))
             return mail.MobileDeepLinkBaseUrl!.TrimEnd('/');
         return (mail.WebAppBaseUrl ?? string.Empty).TrimEnd('/');
+    }
+
+    /// <summary>
+    /// Adatta una URL di destinazione per essere usata come bottone CTA in
+    /// un'email: i client di posta cliccano solo link <c>https://</c>, quindi
+    /// se la destinazione &eacute; un deep-link app (<c>oncallendar://</c>,
+    /// <c>exp://</c>, ecc.) la avvolgiamo in una pagina di redirect HTTPS
+    /// servita dal backend (<c>/r/go?to=...</c>).
+    /// </summary>
+    /// <param name="ctaUrl">Deep-link finale gi&agrave; completo di token.</param>
+    /// <param name="publicBaseUrl">Base url HTTPS pubblica del backend (es. <c>https://api.example.com</c>).</param>
+    public static string WrapForEmail(string ctaUrl, string publicBaseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(ctaUrl)) return ctaUrl;
+        var lower = ctaUrl.Trim().ToLowerInvariant();
+        // Gi&agrave; https: il client mail lo aprir&agrave; senza problemi.
+        if (lower.StartsWith("https://") || lower.StartsWith("http://"))
+            return ctaUrl;
+        if (string.IsNullOrWhiteSpace(publicBaseUrl)) return ctaUrl;
+        var b = publicBaseUrl.TrimEnd('/');
+        return $"{b}/r/go?to={System.Net.WebUtility.UrlEncode(ctaUrl)}";
     }
 }

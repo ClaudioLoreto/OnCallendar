@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, SafeAreaView, ScrollView, Text, TouchableOpacity, View,
+  ActivityIndicator, KeyboardAvoidingView, Platform, SafeAreaView, ScrollView, Text, TouchableOpacity, View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import {
@@ -52,6 +52,17 @@ export default function ProfileScreen({ navigation }: Props) {
   const newPwdStrong = useMemo(() => (newPwd.length === 0 ? true : isPasswordStrong(newPwd)), [newPwd]);
   const wantsPwdChange = pwdOpen && (curPwd.length > 0 || newPwd.length > 0 || newPwd2.length > 0);
 
+  // Salva abilitato solo se ho modificato qualcosa nel form (oppure sto cambiando password).
+  const isDirty = useMemo(() => {
+    if (!me) return false;
+    if (firstName !== me.firstName) return true;
+    if (lastName !== me.lastName) return true;
+    if (email.trim().toLowerCase() !== me.email.toLowerCase()) return true;
+    if ((phone ?? '') !== (me.phone ?? '')) return true;
+    if (wantsPwdChange) return true;
+    return false;
+  }, [me, firstName, lastName, email, phone, wantsPwdChange]);
+
   const loadMe = async () => {
     try {
       const data = await UsersApi.me();
@@ -88,6 +99,7 @@ export default function ProfileScreen({ navigation }: Props) {
     // Validazione cambio password (se compilato)
     if (wantsPwdChange) {
       if (!curPwd) { setPopup({ title: 'Password attuale richiesta', message: 'Per cambiare la password devi inserire quella attuale.', tone: 'warning', icon: 'alert-circle-outline' }); return; }
+      if (curPwd === newPwd) { setPopup({ title: 'Password non valida', message: 'La nuova password deve essere diversa da quella attuale.', tone: 'warning', icon: 'alert-circle-outline' }); return; }
       if (!isPasswordStrong(newPwd)) { setPopup({ title: 'Nuova password troppo debole', message: 'Verifica i requisiti elencati sotto la nuova password.', tone: 'warning', icon: 'shield-half-outline' }); return; }
       if (newPwd !== newPwd2) { setPopup({ title: 'Le password non coincidono', tone: 'warning', icon: 'alert-circle-outline' }); return; }
     }
@@ -138,10 +150,33 @@ export default function ProfileScreen({ navigation }: Props) {
   };
 
   const pickAvatar = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      setPopup({ title: 'Permessi negati', message: "Serve l'accesso alla galleria per cambiare l'avatar.", tone: 'warning', icon: 'image-outline' });
-      return;
+    // Pre-prompt brandizzato: spieghiamo prima a cosa serve l'accesso, poi
+    // chiediamo il permesso di sistema (iOS/Android mostreranno il proprio
+    // dialog con il testo configurato in app.json -> infoPlist / plugins).
+    // Nota: in Expo Go iOS mostra ANCHE un dialog generico "Experience needs
+    // permissions" che e` parte di Expo Go stesso e non si puo` rimuovere; in
+    // una build standalone (EAS) appare solo il nostro testo nativo localizzato.
+    const already = await ImagePicker.getMediaLibraryPermissionsAsync();
+    if (!already.granted) {
+      const proceed = await new Promise<boolean>(resolve => {
+        setPopup({
+          title: 'Foto profilo',
+          message: 'Per cambiare avatar OnCallendar deve poter leggere una foto dalla tua galleria. Concedi il permesso quando il sistema te lo chiede.',
+          tone: 'default',
+          icon: 'image-outline',
+          confirmLabel: 'Continua',
+          cancelLabel: 'Annulla',
+          onConfirm: () => resolve(true),
+        });
+        // Se l'utente chiude (X / fuori), risolvi false.
+        setTimeout(() => resolve(false), 30_000);
+      });
+      if (!proceed) return;
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        setPopup({ title: 'Permesso negato', message: "Senza accesso alla galleria non posso cambiare l'avatar. Puoi abilitarlo dalle Impostazioni del telefono.", tone: 'warning', icon: 'image-outline' });
+        return;
+      }
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -192,7 +227,15 @@ export default function ProfileScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }}>
-      <ScrollView contentContainerStyle={{ padding: theme.spacing.l, paddingBottom: theme.spacing.xxl }}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
+      >
+      <ScrollView
+        contentContainerStyle={{ padding: theme.spacing.l, paddingBottom: theme.spacing.xxl }}
+        keyboardShouldPersistTaps="handled"
+      >
         {/* Header avatar */}
         <View style={{ alignItems: 'center', marginBottom: theme.spacing.l }}>
           <View>
@@ -284,6 +327,11 @@ export default function ProfileScreen({ navigation }: Props) {
                     <PasswordField label="Password attuale" value={curPwd} onChangeText={setCurPwd} />
                     <PasswordField label="Nuova password" value={newPwd} onChangeText={setNewPwd} />
                     {newPwd.length > 0 ? <PasswordRules value={newPwd} /> : null}
+                    {newPwd.length > 0 && curPwd.length > 0 && newPwd === curPwd ? (
+                      <Text style={{ color: theme.colors.danger, marginTop: -theme.spacing.s, marginBottom: theme.spacing.s }}>
+                        La nuova password deve essere diversa da quella attuale.
+                      </Text>
+                    ) : null}
                     <PasswordField label="Conferma nuova password" value={newPwd2} onChangeText={setNewPwd2} />
                   </View>
                 ) : null}
@@ -292,17 +340,22 @@ export default function ProfileScreen({ navigation }: Props) {
               {error ? (
                 <Text style={{ color: theme.colors.danger, marginBottom: theme.spacing.s }}>{error}</Text>
               ) : null}
-              <View style={{ flexDirection: 'row', gap: theme.spacing.s }}>
+              <View style={{
+                flexDirection: 'row',
+                gap: theme.spacing.m,
+                marginTop: pwdOpen ? theme.spacing.m : theme.spacing.l,
+              }}>
                 <View style={{ flex: 1 }}>
-                  <Button title={t('common.cancel')} variant="subtle" onPress={cancelEdit} />
+                  <Button title={t('common.cancel')} variant="subtle" compact onPress={cancelEdit} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Button
                     title={t('profile.save')}
                     icon="checkmark"
+                    compact
                     onPress={save}
                     loading={saving}
-                    disabled={wantsPwdChange && !newPwdStrong}
+                    disabled={!isDirty || (wantsPwdChange && (!newPwdStrong || curPwd === newPwd))}
                   />
                 </View>
               </View>
@@ -382,6 +435,7 @@ export default function ProfileScreen({ navigation }: Props) {
           <Button title={t('profile.logout')} variant="danger" icon="log-out-outline" onPress={onLogout} />
         </Card>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       <ConfirmModal
         visible={!!popup}

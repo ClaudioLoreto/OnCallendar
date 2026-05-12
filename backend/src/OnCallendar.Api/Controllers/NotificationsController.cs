@@ -25,7 +25,7 @@ public sealed class NotificationsController : ControllerBase
         Guid Id, string Type, string? Title, string Message, string? Category,
         bool IsRead, Guid? RelatedEntityId, string? DataJson, DateTime CreatedAtUtc);
 
-    /// <summary>Ultime 50 notifiche dell'utente (non lette prima).</summary>
+    /// <summary>Ultime 20 notifiche dell'utente (non lette prima).</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<NotificationDto>>> List()
     {
@@ -34,7 +34,7 @@ public sealed class NotificationsController : ControllerBase
             .Where(n => n.UserId == uid)
             .OrderBy(n => n.IsRead)
             .ThenByDescending(n => n.CreatedAtUtc)
-            .Take(50)
+            .Take(20)
             .Select(n => new NotificationDto(
                 n.Id, n.Type, n.Title, n.Message, n.Category,
                 n.IsRead, n.RelatedEntityId, n.DataJson, n.CreatedAtUtc))

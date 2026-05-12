@@ -170,7 +170,6 @@ export default function HistoryScreen() {
                       <Text style={[theme.typography.caption, { flex: 1, fontWeight: s.isMineTurno ? '700' : '400' }]}>
                         {s.medicoTurno.fullName}{s.isMineTurno ? ' (tu)' : ''}
                       </Text>
-                      <Text style={theme.typography.caption}>turno</Text>
                     </View>
                   ) : s.externalDoctor ? (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -195,7 +194,6 @@ export default function HistoryScreen() {
                       }]}>
                         {s.medicoReperibile.fullName}{s.isMineReperibile ? ' (tu)' : ''}
                       </Text>
-                      <Badge label="Reperibile" tone="neutral" />
                     </View>
                   ) : null}
                 </View>

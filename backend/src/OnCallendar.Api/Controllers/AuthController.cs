@@ -199,6 +199,9 @@ public sealed class AuthController : ControllerBase
 
             var baseUrl = EmailTemplates.ResolveCallbackBaseUrl(req?.ClientCallbackUrl, _mail);
             var resetUrl = $"{baseUrl}/reset-password?email={encodedEmail}&token={encodedToken}";
+            // Wrap https per email-client compatibility (vedi RedirectController).
+            var publicBackend = $"{Request.Scheme}://{Request.Host.Value}";
+            var ctaUrl = EmailTemplates.WrapForEmail(resetUrl, publicBackend);
 
             var html = EmailTemplates.Build(
                 preheader: "Reimposta la tua password OnCallendar.",
@@ -210,9 +213,9 @@ public sealed class AuthController : ControllerBase
                     "Clicca il bottone qui sotto per scegliere una nuova password. Il link &egrave; valido per <b>1 ora</b>.",
                 },
                 ctaLabel: "Reimposta password",
-                ctaUrl: resetUrl,
+                ctaUrl: ctaUrl,
                 footerNote: "Se non hai richiesto tu il reset puoi ignorare questa email: la tua password attuale resta valida.");
-            var text = $"Reimposta la password aprendo questo link (valido 1 ora):\n{resetUrl}\n\nSe non hai richiesto tu il reset, ignora questa email.";
+            var text = $"Reimposta la password aprendo questo link (valido 1 ora):\n{ctaUrl}\n\nSe non hai richiesto tu il reset, ignora questa email.";
 
             await _email.SendAsync(
                 toEmail: email,
@@ -250,6 +253,10 @@ public sealed class AuthController : ControllerBase
         string rawToken;
         try { rawToken = Encoding.UTF8.GetString(Convert.FromBase64String(req.Token)); }
         catch { return BadRequest(new { error = "Link non valido o scaduto." }); }
+
+        // Vieta nuova password identica a quella attuale.
+        if (await _users.CheckPasswordAsync(user, req.NewPassword))
+            return BadRequest(new { error = "La nuova password deve essere diversa da quella attuale." });
 
         var res = await _users.ResetPasswordAsync(user, rawToken, req.NewPassword);
         if (!res.Succeeded)

@@ -164,13 +164,6 @@ export default function CalendarScreen({ navigation }: Props) {
             <Badge label="Esterno" tone="warning" />
           </View>
         ) : null}
-
-        {s.isMineTurno && !s.isPast ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 }}>
-            <Icon name="ellipsis-horizontal" size={14} color={theme.colors.textMuted} />
-            <Text style={theme.typography.caption}>Tocca per gestire</Text>
-          </View>
-        ) : null}
       </TouchableOpacity>
     );
   };

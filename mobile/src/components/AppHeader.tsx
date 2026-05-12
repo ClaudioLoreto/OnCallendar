@@ -47,11 +47,12 @@ export const AppHeader: React.FC<{
             <View style={{
               position: 'absolute', top: -4, right: -6,
               minWidth: 18, height: 18, borderRadius: 9,
-              backgroundColor: theme.colors.danger,
+              backgroundColor: theme.colors.primary,
+              borderWidth: 1.5, borderColor: theme.colors.background,
               alignItems: 'center', justifyContent: 'center',
               paddingHorizontal: 3,
             }}>
-              <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800', lineHeight: 12 }}>
+              <Text style={{ color: theme.colors.white, fontSize: 10, fontWeight: '800', lineHeight: 12 }}>
                 {unreadCount > 99 ? '99+' : String(unreadCount)}
               </Text>
             </View>

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { SafeAreaView, ScrollView, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, SafeAreaView, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { Button, Card, ConfirmModal, Icon, PasswordField } from '../components/ui';
 import { useTheme } from '../theme/ThemeContext';
 import { useAuth } from '../auth/AuthContext';
@@ -7,9 +7,9 @@ import { UsersApi } from '../api/endpoints';
 import { PasswordRules, isPasswordStrong } from './ResetPasswordScreen';
 
 /**
- * Schermata bloccante mostrata quando la password dell'utente \u00e8 scaduta
- * (passati pi\u00f9 di 12 mesi dall'ultimo cambio). L'utente non pu\u00f2 navigare
- * in nessun'altra parte dell'app finch\u00e9 non imposta una nuova password
+ * Schermata bloccante mostrata quando la password dell'utente è scaduta
+ * (passati più di 12 mesi dall'ultimo cambio). L'utente non può navigare
+ * in nessun'altra parte dell'app finché non imposta una nuova password
  * o non esegue il logout.
  */
 type Props = { onPasswordChanged: () => void };
@@ -29,6 +29,10 @@ export default function PasswordExpiredScreen({ onPasswordChanged }: Props) {
 
   const submit = async () => {
     if (!canSubmit) return;
+    if (oldPwd === newPwd) {
+      setPopup({ title: 'Password non valida', message: 'La nuova password deve essere diversa da quella attuale.', tone: 'warning', icon: 'alert-circle-outline' });
+      return;
+    }
     setBusy(true);
     try {
       await UsersApi.changePassword(oldPwd, newPwd);
@@ -44,7 +48,29 @@ export default function PasswordExpiredScreen({ onPasswordChanged }: Props) {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }}>
-      <ScrollView contentContainerStyle={{ padding: theme.spacing.l, paddingTop: theme.spacing.xl }}>
+      <View style={{ paddingHorizontal: theme.spacing.l, paddingTop: theme.spacing.m }}>
+        <TouchableOpacity
+          onPress={logout}
+          hitSlop={10}
+          style={{
+            width: 40, height: 40, borderRadius: 20,
+            alignItems: 'center', justifyContent: 'center',
+            backgroundColor: theme.colors.surface,
+            borderWidth: 1, borderColor: theme.colors.border,
+          }}
+        >
+          <Icon name="chevron-back" size={22} color={theme.colors.textPrimary} />
+        </TouchableOpacity>
+      </View>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
+      >
+        <ScrollView
+          contentContainerStyle={{ padding: theme.spacing.l, paddingTop: theme.spacing.m, paddingBottom: theme.spacing.xxl }}
+          keyboardShouldPersistTaps="handled"
+        >
         <View style={{ alignItems: 'center', marginBottom: theme.spacing.l }}>
           <View style={{
             width: 72, height: 72, borderRadius: 36,
@@ -62,12 +88,17 @@ export default function PasswordExpiredScreen({ onPasswordChanged }: Props) {
 
         <Card>
           <Text style={[theme.typography.body, { marginBottom: theme.spacing.s }]}>
-            Ciao {user?.fullName ?? ''}, sono passati pi\u00f9 di 12 mesi dall'ultimo cambio password.
+            Ciao {user?.fullName ?? ''}, sono passati più di 12 mesi dall'ultimo cambio password.
             Imposta una nuova password rispettando i requisiti.
           </Text>
           <PasswordField label="Password attuale" value={oldPwd} onChangeText={setOldPwd} />
           <PasswordField label="Nuova password" value={newPwd} onChangeText={setNewPwd} />
           {newPwd.length > 0 ? <PasswordRules value={newPwd} /> : null}
+          {newPwd.length > 0 && oldPwd.length > 0 && newPwd === oldPwd ? (
+            <Text style={{ color: theme.colors.danger, marginTop: -theme.spacing.s, marginBottom: theme.spacing.s }}>
+              La nuova password deve essere diversa da quella attuale.
+            </Text>
+          ) : null}
           <PasswordField label="Conferma nuova password" value={newPwd2} onChangeText={setNewPwd2} />
           {newPwd2.length > 0 && newPwd !== newPwd2 ? (
             <Text style={{ color: theme.colors.danger, marginTop: -theme.spacing.s, marginBottom: theme.spacing.s }}>
@@ -79,12 +110,11 @@ export default function PasswordExpiredScreen({ onPasswordChanged }: Props) {
             icon="shield-checkmark-outline"
             onPress={submit}
             loading={busy}
-            disabled={!canSubmit}
+            disabled={!canSubmit || oldPwd === newPwd}
           />
-          <View style={{ height: theme.spacing.s }} />
-          <Button title="Esci" variant="subtle" icon="log-out-outline" onPress={logout} />
         </Card>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       <ConfirmModal
         visible={!!popup}

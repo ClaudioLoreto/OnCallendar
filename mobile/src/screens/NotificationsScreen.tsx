@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Button, ConfirmModal, EmptyState, Field, PasswordField, Sheet } from '../components/ui';
 import { useTheme } from '../theme/ThemeContext';
 import { useNotifications } from '../auth/NotificationsContext';
-import { AuthApi, MeDto, UsersApi } from '../api/endpoints';
+import { UsersApi } from '../api/endpoints';
 import { buildCallbackUrl } from '../api/callbackUrl';
 
 type Props = { navigation: any };
@@ -34,7 +34,7 @@ function notifTone(type: string): { tone: Tone; icon: string; label: string } {
       return { tone: 'warning', icon: 'ban-outline', label: 'Richiesta annullata' };
     case 'SwapAutoCancelled':
     case 'SwapAutoCancel':
-      return { tone: 'warning', icon: 'time-outline', label: 'Turno gi\u00e0 preso' };
+      return { tone: 'warning', icon: 'time-outline', label: 'Turno già preso' };
     // SWAP — esito negativo
     case 'SwapRejected':
     case 'CounterOfferRejected':
@@ -55,7 +55,7 @@ function notifTone(type: string): { tone: Tone; icon: string; label: string } {
     case 'ReminderShiftTomorrow':
       return { tone: 'warning', icon: 'alarm-outline', label: 'Promemoria turno' };
     case 'ReminderOnCallToday':
-      return { tone: 'primary', icon: 'pulse-outline', label: 'Reperibilit\u00e0 oggi' };
+      return { tone: 'primary', icon: 'pulse-outline', label: 'Reperibilità oggi' };
     // SISTEMA
     case 'SystemAnnouncement':
       return { tone: 'primary', icon: 'megaphone-outline', label: 'Avviso' };
@@ -78,8 +78,7 @@ const timeAgo = (iso: string): string => {
 
 export default function NotificationsScreen({ navigation }: Props) {
   const { theme } = useTheme();
-  const { notifications, loading, refresh, markAllRead } = useNotifications();
-  const [me, setMe] = useState<MeDto | null>(null);
+  const { notifications, loading, refresh, refreshMe, markRead, me } = useNotifications();
 
   // Sheet per gestire pending email (cambio o reinvio)
   const [pendingSheetOpen, setPendingSheetOpen] = useState(false);
@@ -94,17 +93,14 @@ export default function NotificationsScreen({ navigation }: Props) {
 
   const [popup, setPopup] = useState<{ title: string; message?: string; tone?: Tone | 'default'; icon?: any } | null>(null);
 
-  const loadMe = () => { UsersApi.me().then(setMe).catch(() => {}); };
-
+  // All'apertura: solo refresh, NIENTE markAllRead. Le notifiche restano "non lette"
+  // (badge campanella ancora visibile) finché l'utente non clicca la singola notifica.
   useEffect(() => {
     refresh();
-    loadMe();
-    const t = setTimeout(() => { markAllRead(); }, 1500);
-    return () => clearTimeout(t);
   }, []);
 
   // ---- Account alerts (palette unificata) ----
-  // Mutual exclusion: se c'\u00e8 pendingEmail NON mostro l'alert "email di default".
+  // Mutual exclusion: se c'è pendingEmail NON mostro l'alert "email di default".
   type AccountAlert = {
     id: string;
     icon: string;
@@ -152,14 +148,14 @@ export default function NotificationsScreen({ navigation }: Props) {
         icon: 'time-outline',
         tone: 'warning',
         title: 'Password scaduta',
-        message: 'Sono passati pi\u00f9 di 12 mesi dall\'ultimo cambio. Tocca qui per cambiarla.',
+        message: 'Sono passati più di 12 mesi dall\'ultimo cambio. Tocca qui per cambiarla.',
         onPress: () => setPwdSheetOpen(true),
       });
     }
     return list;
   }, [me]);
 
-  const onRefresh = () => { refresh(); loadMe(); };
+  const onRefresh = () => { refresh(); refreshMe(); };
 
   const tinted = (tone: Tone) => {
     const c = theme.colors[tone] ?? theme.colors.primary;
@@ -174,7 +170,7 @@ export default function NotificationsScreen({ navigation }: Props) {
     try {
       const r = await UsersApi.requestEmailChange(target, buildCallbackUrl('confirm-email'));
       setPendingSheetOpen(false);
-      loadMe();
+      refreshMe();
       setPopup({
         title: 'Email inviata',
         message: `Ti abbiamo inviato un link a ${r.pendingEmail}. Aprila e clicca il pulsante per attivare il nuovo indirizzo.`,
@@ -199,12 +195,16 @@ export default function NotificationsScreen({ navigation }: Props) {
       setPopup({ title: 'Dati non validi', message: 'Verifica i campi: password attuale richiesta, nuova min. 8 caratteri e conferma uguale.', tone: 'warning', icon: 'alert-circle-outline' });
       return;
     }
+    if (oldPwd === newPwd) {
+      setPopup({ title: 'Password non valida', message: 'La nuova password deve essere diversa da quella attuale.', tone: 'warning', icon: 'alert-circle-outline' });
+      return;
+    }
     setBusy(true);
     try {
       await UsersApi.changePassword(oldPwd, newPwd);
       setPwdSheetOpen(false);
       setOldPwd(''); setNewPwd(''); setNewPwd2('');
-      loadMe();
+      refreshMe();
       setPopup({ title: 'Password aggiornata', tone: 'success', icon: 'shield-checkmark-outline' });
     } catch (e: any) {
       setPopup({ title: 'Errore', message: e?.response?.data?.errors?.join(' ') ?? e?.response?.data?.error ?? 'Cambio non riuscito.', tone: 'danger', icon: 'alert-circle-outline' });
@@ -253,7 +253,7 @@ export default function NotificationsScreen({ navigation }: Props) {
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }}>
       <FlatList
         contentContainerStyle={{ padding: theme.spacing.l, paddingBottom: 80 }}
-        data={notifications}
+        data={notifications.slice(0, 20)}
         keyExtractor={n => n.id}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} />}
         ListHeaderComponent={headerComponent}
@@ -267,13 +267,15 @@ export default function NotificationsScreen({ navigation }: Props) {
           const isSwap = (cat === 'swap' || item.type.startsWith('Swap') || item.type.startsWith('CounterOffer')) && !!item.relatedEntityId;
           const isShift = cat === 'shift' || cat === 'reminder';
           const onPress = () => {
+            // Segna come letta (rimuove l'evidenza colorata e decrementa il badge)
+            if (!item.isRead) markRead(item.id);
             if (isSwap) {
               navigation.navigate('Main', { screen: 'Swaps', params: { openSwapId: item.relatedEntityId } });
             } else if (isShift) {
               navigation.navigate('Main', { screen: 'Calendar' });
             }
           };
-          const tappable = isSwap || isShift;
+          const tappable = isSwap || isShift || !item.isRead;
           return (
             <TouchableOpacity
               activeOpacity={tappable ? 0.7 : 1}

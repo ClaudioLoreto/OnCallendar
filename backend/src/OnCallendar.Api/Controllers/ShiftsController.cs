@@ -198,13 +198,15 @@ public sealed class ShiftsController : ControllerBase
                 var baseUrl = !string.IsNullOrWhiteSpace(_mail.MobileDeepLinkBaseUrl)
                     ? _mail.MobileDeepLinkBaseUrl!.TrimEnd('/')
                     : (_mail.WebAppBaseUrl ?? string.Empty).TrimEnd('/');
-                var url = $"{baseUrl}/register-external?token={ext.InviteToken}";
+                var deepLink = $"{baseUrl}/register-external?token={ext.InviteToken}";
+                // Wrap https (vedi RedirectController) per renderlo cliccabile in tutti i client mail.
+                var publicBackend = $"{Request.Scheme}://{Request.Host.Value}";
+                var url = OnCallendar.Infrastructure.Mail.EmailTemplates.WrapForEmail(deepLink, publicBackend);
                 var html = $@"
 <p>Ciao {HttpUtility.HtmlEncode(ext.FirstName)},</p>
 <p>Sei stato indicato come medico esterno che coprirà un turno su OnCallendar.</p>
 <p>Per gestire i tuoi turni puoi registrarti gratuitamente nell'app:</p>
-<p><a href='{url}' style='display:inline-block;padding:10px 20px;background:#2563eb;color:#fff;border-radius:6px;text-decoration:none;'>Registrati su OnCallendar</a></p>
-<p>Oppure copia e incolla questo link nel browser:<br/><span style='word-break:break-all;'>{url}</span></p>
+<p><a href='{url}' style='display:inline-block;padding:10px 20px;background:#355872;color:#fff;border-radius:6px;text-decoration:none;'>Registrati su OnCallendar</a></p>
 <p>Se non vuoi registrarti puoi ignorare questa email: continuerai comunque a coprire i turni concordati.</p>
 <p>— OnCallendar</p>";
                 var text = $"Ciao {ext.FirstName},\n\nRegistrati su OnCallendar aprendo questo link:\n{url}\n\nSe non vuoi registrarti puoi ignorare questa email.";

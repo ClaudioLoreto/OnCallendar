@@ -12,7 +12,14 @@
       "resizeMode": "contain",
       "backgroundColor": "#F7F8F0"
     },
-    "ios": { "supportsTablet": true, "bundleIdentifier": "local.oncallendar" },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "local.oncallendar",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "OnCallendar usa la galleria solo per impostare la tua foto profilo.",
+        "NSCameraUsageDescription": "OnCallendar non usa la fotocamera. Questa autorizzazione non viene richiesta in fase di scelta dell'avatar."
+      }
+    },
     "android": {
       "package": "local.oncallendar",
       "versionCode": 1,
@@ -21,6 +28,15 @@
         "backgroundColor": "#F7F8F0"
       }
     },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "OnCallendar usa la galleria solo per impostare la tua foto profilo.",
+          "cameraPermission": "OnCallendar non usa la fotocamera per la foto profilo."
+        }
+      ]
+    ],
     "web": {
       "bundler": "metro",
       "output": "single",
