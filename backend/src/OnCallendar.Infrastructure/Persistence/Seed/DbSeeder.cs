@@ -120,19 +120,19 @@ public static class DbSeeder
         }
 
         // ── 4 Medici di Navelli ──────────────────────────────────────────
-        // Strategia: se QUALSIASI badge M01-M04 esiste già nel DB,
-        // siamo in un DB esistente (prod/dev con dati). Solo SQL UPDATE
-        // per aggiornare nomi/numero, ZERO chiamate a UserManager
-        // (evita conflitti IX_AspNetUsers_Badge dal ChangeTracker).
+        // Strategia: se QUALSIASI utente medico esiste già nel DB
+        // (controllato per Role, non per Badge — più robusto),
+        // usiamo SOLO SQL UPDATE puro. ZERO chiamate a UserManager,
+        // ZERO SaveChangesAsync, ZERO ChangeTracker per evitare
+        // IX_AspNetUsers_Badge conflicts.
         db.ChangeTracker.Clear();
 
-        var existingBadgeCount = await db.Users.IgnoreQueryFilters().AsNoTracking()
-            .CountAsync(u => u.Badge != null &&
-                new[] { "M01", "M02", "M03", "M04" }.Contains(u.Badge), ct);
+        var hasMedici = await db.Users.IgnoreQueryFilters().AsNoTracking()
+            .AnyAsync(u => u.Role == UserRole.Medico, ct);
 
-        if (existingBadgeCount > 0)
+        if (hasMedici)
         {
-            // DB esistente: aggiorna nomi via SQL puro (safe, nessun conflitto).
+            // DB esistente (prod): aggiorna nomi/badge via SQL puro.
             foreach (var (number, badge, _, _, first, last) in Medici)
             {
                 await db.Database.ExecuteSqlInterpolatedAsync(
@@ -146,7 +146,7 @@ public static class DbSeeder
         }
         else
         {
-            // DB completamente fresco: serve UserManager per creare utenti.
+            // DB completamente fresco (primo avvio): serve UserManager.
             try
             {
                 await SeedMediciAsync(db, userManager, tenant.Id, ct);
@@ -155,6 +155,8 @@ public static class DbSeeder
             {
                 System.Console.Error.WriteLine(
                     $"[DbSeeder] Medici seed warning (non-fatal): {ex.GetType().Name}: {ex.Message}");
+                // Pulizia CRITICA: ChangeTracker corrotto dopo eccezione DB
+                db.ChangeTracker.Clear();
             }
         }
 

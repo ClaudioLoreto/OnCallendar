@@ -244,8 +244,15 @@ using (var scope = app.Services.CreateScope())
     {
         // Il seed NON deve MAI impedire l'avvio dell'app.
         // In prod i dati esistono già; un errore di seed è solo un warning.
-        var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("DbSeeder");
-        logger.LogError(ex, "Seed failed (non-fatal). L'app continua comunque.");
+        // Pulizia ChangeTracker: previene propagazione durante dispose dello scope.
+        try { db.ChangeTracker.Clear(); } catch { /* ignore */ }
+        Console.Error.WriteLine($"[SEED ERROR] {ex.GetType().Name}: {ex.Message}");
+        try
+        {
+            var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("DbSeeder");
+            logger.LogError(ex, "Seed failed (non-fatal). L'app continua comunque.");
+        }
+        catch { /* logger failure must not crash startup */ }
     }
 }
 
