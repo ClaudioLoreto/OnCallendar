@@ -172,19 +172,25 @@ public static class DbSeeder
             }
         }
 
-        // Step 2: azzera Badge/MedicoNumber su TUTTI i 4 medici di Navelli per
-        // permettere uno swap (es. l'utente che era M01 deve diventare M04 e
-        // viceversa, senza violare il vincolo unique su Badge).
-        var emails = Medici.Select(m => m.Email).ToArray();
-        var existingMedici = await db.Users.IgnoreQueryFilters()
-            .Where(u => u.Email != null && emails.Contains(u.Email))
+        // Step 2: azzera Badge/MedicoNumber su TUTTI gli utenti che hanno uno
+        // dei badge seed, non solo quelli trovati per email (in prod gli utenti
+        // potrebbero aver cambiato email, ma conservano il vecchio Badge).
+        var seedBadges = Medici.Select(m => m.Badge).ToArray();
+        var usersWithSeedBadges = await db.Users.IgnoreQueryFilters()
+            .Where(u => u.Badge != null && seedBadges.Contains(u.Badge))
             .ToListAsync(ct);
-        foreach (var u in existingMedici)
+        foreach (var u in usersWithSeedBadges)
         {
             u.Badge = null;
             u.MedicoNumber = null;
         }
         await db.SaveChangesAsync(ct);
+
+        // Re-fetch per email per Step 3 (include utenti appena creati in Step 1)
+        var emails = Medici.Select(m => m.Email).ToArray();
+        var existingMedici = await db.Users.IgnoreQueryFilters()
+            .Where(u => u.Email != null && emails.Contains(u.Email))
+            .ToListAsync(ct);
 
         // Step 3: applica la mappatura corretta (numero, badge, nome, cognome).
         foreach (var (number, badge, email, _, first, last) in Medici)
