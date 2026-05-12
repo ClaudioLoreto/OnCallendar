@@ -172,37 +172,41 @@ public static class DbSeeder
             }
         }
 
-        // Step 2: azzera Badge/MedicoNumber su TUTTI gli utenti che hanno uno
-        // dei badge seed usando SQL diretto (bypassa EF ChangeTracker per evitare
-        // conflitti unique durante SaveChanges).
+        // Step 2+3 combinati: assegna Badge/MedicoNumber interamente via SQL.
+        // Il ChangeTracker di EF e UserManager possono avere entità sporche dopo
+        // Step 1, quindi usiamo SQL diretto per evitare QUALSIASI conflitto
+        // con il vincolo unique IX_AspNetUsers_Badge.
+
+        // Prima: azzera TUTTI i Badge (non solo M01-M04, qualsiasi valore)
+        // sugli utenti seed per email O per badge. Questo copre:
+        //  - utenti che non hanno cambiato email (trovati per email)
+        //  - utenti che hanno cambiato email (trovati per badge)
         await db.Database.ExecuteSqlRawAsync(
-            @"UPDATE ""AspNetUsers"" SET ""Badge"" = NULL, ""MedicoNumber"" = NULL
-              WHERE ""Badge"" IN ('M01','M02','M03','M04')", ct);
+            @"UPDATE ""AspNetUsers""
+              SET ""Badge"" = NULL, ""MedicoNumber"" = NULL
+              WHERE ""Badge"" IN ('M01','M02','M03','M04')
+                 OR ""NormalizedEmail"" IN ('MEDICO1@NAVELLI.LOCAL','MEDICO2@NAVELLI.LOCAL',
+                                           'MEDICO3@NAVELLI.LOCAL','MEDICO4@NAVELLI.LOCAL')");
 
-        // Svuota il ChangeTracker: le entità caricate in Step 1 potrebbero avere
-        // dati stale dopo l'UPDATE SQL diretto.
-        db.ChangeTracker.Clear();
-
-        // Step 3: ricarica gli utenti seed per email e assegna Badge/MedicoNumber.
-        var emails = Medici.Select(m => m.Email).ToArray();
-        var existingMedici = await db.Users.IgnoreQueryFilters()
-            .Where(u => u.Email != null && emails.Contains(u.Email))
-            .ToListAsync(ct);
-
+        // Poi: assegna Badge/MedicoNumber uno alla volta via SQL.
+        // Ogni UPDATE tocca esattamente 1 riga (per NormalizedEmail).
+        // Non tocchiamo Role/TenantId: sono già corretti da CreateAsync in Step 1.
         foreach (var (number, badge, email, _, first, last) in Medici)
         {
-            var user = existingMedici.FirstOrDefault(u =>
-                string.Equals(u.Email, email, StringComparison.OrdinalIgnoreCase));
-            if (user is null) continue; // safety: non dovrebbe mai accadere
-            user.MedicoNumber = number;
-            user.Badge = badge;
-            user.FirstName = first;
-            user.LastName = last;
-            user.Role = UserRole.Medico;
-            user.TenantId = tenant.Id;
-            user.IsActive = true;
+            var normalizedEmail = email.ToUpperInvariant();
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $@"UPDATE ""AspNetUsers""
+                   SET ""Badge"" = {badge},
+                       ""MedicoNumber"" = {number},
+                       ""FirstName"" = {first},
+                       ""LastName"" = {last},
+                       ""IsActive"" = true
+                   WHERE ""NormalizedEmail"" = {normalizedEmail}", ct);
         }
-        await db.SaveChangesAsync(ct);
+
+        // Svuota il ChangeTracker: le entità caricate da UserManager in Step 1
+        // hanno dati stale (Badge=null) rispetto al DB (Badge=M0x).
+        db.ChangeTracker.Clear();
 
         await SeedShiftsAsync(db, tenant.Id, ct);
     }
