@@ -173,30 +173,27 @@ public static class DbSeeder
         }
 
         // Step 2: azzera Badge/MedicoNumber su TUTTI gli utenti che hanno uno
-        // dei badge seed, non solo quelli trovati per email (in prod gli utenti
-        // potrebbero aver cambiato email, ma conservano il vecchio Badge).
-        var seedBadges = Medici.Select(m => m.Badge).ToArray();
-        var usersWithSeedBadges = await db.Users.IgnoreQueryFilters()
-            .Where(u => u.Badge != null && seedBadges.Contains(u.Badge))
-            .ToListAsync(ct);
-        foreach (var u in usersWithSeedBadges)
-        {
-            u.Badge = null;
-            u.MedicoNumber = null;
-        }
-        await db.SaveChangesAsync(ct);
+        // dei badge seed usando SQL diretto (bypassa EF ChangeTracker per evitare
+        // conflitti unique durante SaveChanges).
+        await db.Database.ExecuteSqlRawAsync(
+            @"UPDATE ""AspNetUsers"" SET ""Badge"" = NULL, ""MedicoNumber"" = NULL
+              WHERE ""Badge"" IN ('M01','M02','M03','M04')", ct);
 
-        // Re-fetch per email per Step 3 (include utenti appena creati in Step 1)
+        // Svuota il ChangeTracker: le entità caricate in Step 1 potrebbero avere
+        // dati stale dopo l'UPDATE SQL diretto.
+        db.ChangeTracker.Clear();
+
+        // Step 3: ricarica gli utenti seed per email e assegna Badge/MedicoNumber.
         var emails = Medici.Select(m => m.Email).ToArray();
         var existingMedici = await db.Users.IgnoreQueryFilters()
             .Where(u => u.Email != null && emails.Contains(u.Email))
             .ToListAsync(ct);
 
-        // Step 3: applica la mappatura corretta (numero, badge, nome, cognome).
         foreach (var (number, badge, email, _, first, last) in Medici)
         {
-            var user = existingMedici.First(u =>
+            var user = existingMedici.FirstOrDefault(u =>
                 string.Equals(u.Email, email, StringComparison.OrdinalIgnoreCase));
+            if (user is null) continue; // safety: non dovrebbe mai accadere
             user.MedicoNumber = number;
             user.Badge = badge;
             user.FirstName = first;
