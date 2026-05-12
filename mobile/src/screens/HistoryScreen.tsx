@@ -168,7 +168,7 @@ export default function HistoryScreen() {
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                       <Avatar fullName={s.medicoTurno.fullName} url={s.medicoTurno.avatarUrl} size={22} />
                       <Text style={[theme.typography.caption, { flex: 1, fontWeight: s.isMineTurno ? '700' : '400' }]}>
-                        {s.medicoTurno.fullName}{s.isMineTurno ? ' (tu)' : ''}
+                        {s.medicoTurno.fullName}
                       </Text>
                     </View>
                   ) : s.externalDoctor ? (
@@ -192,7 +192,7 @@ export default function HistoryScreen() {
                         fontWeight: s.isMineReperibile ? '700' : '400',
                         color: theme.colors.textSecondary,
                       }]}>
-                        {s.medicoReperibile.fullName}{s.isMineReperibile ? ' (tu)' : ''}
+                        {s.medicoReperibile.fullName}
                       </Text>
                     </View>
                   ) : null}

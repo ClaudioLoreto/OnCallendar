@@ -287,10 +287,43 @@ export const Field: React.FC<{ label?: string; readonly?: boolean } & TextInputP
   );
 };
 
-// ---------- Themed Password TextInput (con toggle occhio) ----------
-export const PasswordField: React.FC<{ label?: string } & Omit<TextInputProps, 'secureTextEntry'>> = ({ label, style, ...rest }) => {
+// ---------- Themed Password TextInput (con toggle occhio + caps-lock badge web) ----------
+export const PasswordField: React.FC<{ label?: string } & Omit<TextInputProps, 'secureTextEntry'>> = ({ label, style, onFocus, onBlur, ...rest }) => {
   const { theme } = useTheme();
   const [visible, setVisible] = React.useState(false);
+  const [capsOn, setCapsOn] = React.useState(false);
+  const [focused, setFocused] = React.useState(false);
+
+  // Rilevamento Caps Lock affidabile solo su web (KeyboardEvent.getModifierState).
+  // Su iOS/Android la tastiera di sistema non espone l'evento: lasciamo perdere
+  // (iOS mostra il proprio overlay nativo nei campi password).
+  React.useEffect(() => {
+    if (Platform.OS !== 'web' || !focused) {
+      // Quando si perde il focus o non siamo su web spegniamo subito il badge
+      // per evitare che resti acceso "fantasma".
+      if (capsOn) setCapsOn(false);
+      return;
+    }
+    const update = (e: any) => {
+      try {
+        if (typeof e.getModifierState === 'function') {
+          setCapsOn(!!e.getModifierState('CapsLock'));
+        }
+      } catch {
+        /* noop */
+      }
+    };
+    // Ascoltiamo sia keydown sia keyup: se l'utente preme Caps mentre il campo
+    // ha focus, lo prendiamo a keydown; se lo spegne (anche fuori dal campo)
+    // ci accorgiamo al keyup successivo o al prossimo evento qualunque.
+    window.addEventListener('keydown', update);
+    window.addEventListener('keyup', update);
+    return () => {
+      window.removeEventListener('keydown', update);
+      window.removeEventListener('keyup', update);
+    };
+  }, [focused, capsOn]);
+
   return (
     <View style={{ marginBottom: theme.spacing.m }}>
       {label ? (
@@ -306,12 +339,28 @@ export const PasswordField: React.FC<{ label?: string } & Omit<TextInputProps, '
           secureTextEntry={!visible}
           autoCapitalize="none"
           autoCorrect={false}
+          onFocus={(e) => { setFocused(true); onFocus?.(e); }}
+          onBlur={(e) => { setFocused(false); setCapsOn(false); onBlur?.(e); }}
           style={[
             { flex: 1, paddingHorizontal: theme.spacing.m, paddingVertical: 12, fontSize: 16, color: theme.colors.textPrimary },
             style as any,
           ]}
           {...rest}
         />
+        {capsOn ? (
+          <View
+            accessibilityLabel="Caps Lock attivo"
+            style={{
+              flexDirection: 'row', alignItems: 'center',
+              backgroundColor: theme.colors.primary,
+              paddingHorizontal: 6, paddingVertical: 2,
+              borderRadius: 4, marginRight: 4,
+            }}
+          >
+            <Ionicons name="arrow-up" size={12} color={theme.colors.white} />
+            <Text style={{ color: theme.colors.white, fontSize: 10, fontWeight: '700', marginLeft: 2 }}>CAPS</Text>
+          </View>
+        ) : null}
         <TouchableOpacity
           onPress={() => setVisible(v => !v)}
           hitSlop={10}

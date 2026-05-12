@@ -230,10 +230,10 @@ export default function ProfileScreen({ navigation }: Props) {
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 96 : 24}
       >
       <ScrollView
-        contentContainerStyle={{ padding: theme.spacing.l, paddingBottom: theme.spacing.xxl }}
+        contentContainerStyle={{ padding: theme.spacing.l, paddingBottom: theme.spacing.xxl * 3 }}
         keyboardShouldPersistTaps="handled"
       >
         {/* Header avatar */}

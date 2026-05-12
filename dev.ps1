@@ -133,7 +133,7 @@ function Stop-All {
 
 function Suggest-CommitMessage {
     # Costruisce un messaggio commit precompilato a partire dai file modificati,
-    # raggruppati per area logica. Restituisce una stringa multi-riga.
+    # raggruppati per area logica + un tentativo di descrizione automatica.
     $statusLines = git -C $root status --porcelain
     if (-not $statusLines) { return "" }
 
@@ -155,9 +155,30 @@ function Suggest-CommitMessage {
     if ($by.infra)   { $parts += "infra ($($by.infra.Count))" }
     if ($by.other)   { $parts += "other ($($by.other.Count))" }
 
+    # Heuristica: prova a indovinare COSA cambia guardando i nomi file.
+    # E` solo un suggerimento; l'utente potra` riscriverlo.
+    $hints = @()
+    $allLower = ($files -join ' ').ToLower()
+    if ($allLower -match 'controller')                  { $hints += 'endpoint API' }
+    if ($allLower -match 'screen|component')            { $hints += 'UI mobile' }
+    if ($allLower -match 'mail|email|template')         { $hints += 'template email' }
+    if ($allLower -match 'auth|login|password|token')   { $hints += 'autenticazione' }
+    if ($allLower -match 'notification|push')           { $hints += 'notifiche' }
+    if ($allLower -match 'migration')                   { $hints += 'migration DB' }
+    if ($allLower -match 'context|provider')            { $hints += 'state app' }
+    if ($allLower -match 'theme|style|color|palette')   { $hints += 'styling' }
+    if ($allLower -match 'dev\.ps1|start-expo|script')  { $hints += 'tooling dev' }
+    if ($allLower -match 'permission|avatar|image')     { $hints += 'permessi/media' }
+    $hintLine = if ($hints) { "Aree toccate: " + ($hints -join ', ') + "." } else { "" }
+
     $title = "chore: update " + ($parts -join ", ")
 
     $bodyLines = @()
+    if ($hintLine) {
+        $bodyLines += ""
+        $bodyLines += $hintLine
+        $bodyLines += "(scrivi qui sotto una breve nota su cosa/perche` se utile)"
+    }
     foreach ($area in 'backend','mobile','web','infra','other') {
         $list = $by[$area]
         if ($list -and $list.Count -gt 0) {
@@ -172,15 +193,29 @@ function Suggest-CommitMessage {
 }
 
 function Read-CommitMessage([string]$suggested) {
-    # Mostra il suggerimento e permette: invio = usa cosi`, "n" = scrivi da zero,
-    # qualsiasi altra stringa = usa quella riga come commit (single-line).
+    # Mostra il suggerimento e permette:
+    #   invio                          = usa cosi com'e (titolo + descrizione + file)
+    #   d                              = aggiungi una nota tua in cima e tieni il resto
+    #   n                              = scrivi tutto da zero (single-line)
+    #   qualsiasi altra stringa        = usa quella riga come commit completo
     Write-Host ""
-    Write-Host "  Messaggio commit suggerito (in base ai file modificati):" -ForegroundColor Cyan
+    Write-Host "  Messaggio commit suggerito:" -ForegroundColor Cyan
     Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
     foreach ($l in ($suggested -split "`n")) { Write-Host "  $l" -ForegroundColor Gray }
     Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
-    $resp = Read-Host "  [invio = usa il suggerito] [n = scrivi da zero] [oppure scrivi un messaggio]"
+    Write-Host "  [invio] usa il suggerito"
+    Write-Host "  [d]     aggiungi una breve descrizione in cima e tieni il resto"
+    Write-Host "  [n]     scrivi tutto da zero"
+    Write-Host "  oppure scrivi direttamente un messaggio inline"
+    $resp = Read-Host "  > "
     if ([string]::IsNullOrWhiteSpace($resp)) { return $suggested }
+    if ($resp -match '^[Dd]$') {
+        $note = Read-Host "  Breve descrizione (cosa/perche)"
+        if ([string]::IsNullOrWhiteSpace($note)) { return $suggested }
+        # Sostituisce il titolo con quello dell'utente e aggiunge il body originale.
+        $body = ($suggested -split "`n", 2)[1]
+        return "$note`n$body"
+    }
     if ($resp -match '^[Nn]$') {
         $custom = Read-Host "  Messaggio commit (lascia vuoto per annullare)"
         if ([string]::IsNullOrWhiteSpace($custom)) { return $null }
@@ -189,15 +224,22 @@ function Read-CommitMessage([string]$suggested) {
     return $resp
 }
 
+function Read-TargetBranch([string]$default) {
+    Write-Host ""
+    Write-Host "  Branch disponibili:" -ForegroundColor Cyan
+    $branches = git -C $root branch --format='%(refname:short)'
+    foreach ($b in $branches) { Write-Host "   - $b" -ForegroundColor Gray }
+    $branch = Read-Host "  Branch destinazione? [invio = $default]"
+    if ([string]::IsNullOrWhiteSpace($branch)) { return $default }
+    return $branch.Trim()
+}
+
 function Git-Push {
     Write-Host ""
     $currentBranch = git -C $root branch --show-current 2>$null
     Write-Host "  Branch corrente: $currentBranch" -ForegroundColor Cyan
     Write-Host ""
-    git -C $root branch
-    Write-Host ""
-    $branch = Read-Host "  Branch per il push? [invio = $currentBranch]"
-    if ([string]::IsNullOrWhiteSpace($branch)) { $branch = $currentBranch }
+    $branch = Read-TargetBranch $currentBranch
 
     if ($branch -ne $currentBranch) {
         git -C $root checkout $branch
@@ -234,12 +276,9 @@ function Deploy-Railway {
     $currentBranch = git -C $root branch --show-current 2>$null
     Write-Host "  Branch corrente: $currentBranch" -ForegroundColor Cyan
     Write-Host ""
-    git -C $root branch
-    Write-Host ""
 
     # Branch di produzione su Railway (di default main, ma potresti averlo cambiato)
-    $prodBranch = Read-Host "  Branch di deploy Railway? [invio = main]"
-    if ([string]::IsNullOrWhiteSpace($prodBranch)) { $prodBranch = "main" }
+    $prodBranch = Read-TargetBranch "main"
 
     Write-Host ""
     git -C $root status --short

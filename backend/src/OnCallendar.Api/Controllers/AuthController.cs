@@ -200,7 +200,9 @@ public sealed class AuthController : ControllerBase
             var baseUrl = EmailTemplates.ResolveCallbackBaseUrl(req?.ClientCallbackUrl, _mail);
             var resetUrl = $"{baseUrl}/reset-password?email={encodedEmail}&token={encodedToken}";
             // Wrap https per email-client compatibility (vedi RedirectController).
-            var publicBackend = $"{Request.Scheme}://{Request.Host.Value}";
+            // Usa PublicRedirectBaseUrl (Railway) se configurato, cosi' il bottone
+            // funziona anche in DEV dove il backend gira su localhost.
+            var publicBackend = EmailTemplates.ResolvePublicRedirectBaseUrl(_mail, $"{Request.Scheme}://{Request.Host.Value}");
             var ctaUrl = EmailTemplates.WrapForEmail(resetUrl, publicBackend);
 
             var html = EmailTemplates.Build(

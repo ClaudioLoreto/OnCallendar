@@ -41,6 +41,21 @@ public sealed class MailSettings
     public string? MobileDeepLinkBaseUrl { get; set; }
 
     /// <summary>
+    /// Base URL HTTPS sempre pubblica (es. <c>https://api-production-xxx.up.railway.app</c>)
+    /// usata per generare la pagina <c>/r/go</c> di redirect nelle email.
+    /// Serve a rendere cliccabili i link anche quando il deep-link reale usa
+    /// schemi non riconosciuti dai mailer (<c>exp://</c>, <c>oncallendar://</c>):
+    /// il bottone della mail punta a questa base URL, la pagina apre
+    /// automaticamente la vera deep-link (<see cref="MobileDeepLinkBaseUrl"/>
+    /// o <see cref="WebAppBaseUrl"/>).
+    /// In DEV impostarla all'URL Railway pubblico così il bottone funziona
+    /// davvero anche se il backend dev gira su localhost.
+    /// Se null si ricade su <see cref="WebAppBaseUrl"/> e poi sull'URL della
+    /// request HTTP corrente.
+    /// </summary>
+    public string? PublicRedirectBaseUrl { get; set; }
+
+    /// <summary>
     /// Se valorizzato, TUTTE le mail vengono dirottate verso questo
     /// indirizzo (utile in DEV o con Resend free tier senza dominio
     /// verificato, dove Resend consegna solo all'owner dell'account).

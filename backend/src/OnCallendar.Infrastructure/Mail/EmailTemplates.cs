@@ -161,4 +161,23 @@ public static class EmailTemplates
         var b = publicBaseUrl.TrimEnd('/');
         return $"{b}/r/go?to={System.Net.WebUtility.UrlEncode(ctaUrl)}";
     }
+
+    /// <summary>
+    /// Risolve la base URL pubblica HTTPS da usare come host della pagina
+    /// <c>/r/go</c> di redirect nelle email. Priorita`:
+    /// 1. <c>MailSettings.PublicRedirectBaseUrl</c> (esplicita, consigliata in dev:
+    ///    deve puntare al backend Railway pubblico)
+    /// 2. <c>MailSettings.WebAppBaseUrl</c> se inizia con <c>https://</c>
+    /// 3. <paramref name="requestFallback"/> = <c>{Request.Scheme}://{Request.Host}</c>
+    ///    (utile in produzione single-instance dove la request stessa &eacute; pubblica).
+    /// </summary>
+    public static string ResolvePublicRedirectBaseUrl(MailSettings mail, string requestFallback)
+    {
+        if (!string.IsNullOrWhiteSpace(mail.PublicRedirectBaseUrl))
+            return mail.PublicRedirectBaseUrl!.TrimEnd('/');
+        var web = mail.WebAppBaseUrl;
+        if (!string.IsNullOrWhiteSpace(web) && web!.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            return web!.TrimEnd('/');
+        return (requestFallback ?? string.Empty).TrimEnd('/');
+    }
 }

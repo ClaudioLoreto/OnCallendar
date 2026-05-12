@@ -220,7 +220,8 @@ public sealed class UsersController : ControllerBase
         // Wrap https per renderlo cliccabile in qualsiasi client mail (Gmail/Outlook
         // bloccano scheme custom come exp:// o oncallendar://). La pagina /r/go
         // del backend fa il redirect immediato all'app reale.
-        var publicBackend = $"{Request.Scheme}://{Request.Host.Value}";
+        // Risolto via PublicRedirectBaseUrl => Railway anche se siamo in DEV.
+        var publicBackend = EmailTemplates.ResolvePublicRedirectBaseUrl(_mail, $"{Request.Scheme}://{Request.Host.Value}");
         var ctaUrl = EmailTemplates.WrapForEmail(url, publicBackend);
 
         var html = EmailTemplates.Build(

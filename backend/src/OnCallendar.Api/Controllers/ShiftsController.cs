@@ -200,7 +200,7 @@ public sealed class ShiftsController : ControllerBase
                     : (_mail.WebAppBaseUrl ?? string.Empty).TrimEnd('/');
                 var deepLink = $"{baseUrl}/register-external?token={ext.InviteToken}";
                 // Wrap https (vedi RedirectController) per renderlo cliccabile in tutti i client mail.
-                var publicBackend = $"{Request.Scheme}://{Request.Host.Value}";
+                var publicBackend = OnCallendar.Infrastructure.Mail.EmailTemplates.ResolvePublicRedirectBaseUrl(_mail, $"{Request.Scheme}://{Request.Host.Value}");
                 var url = OnCallendar.Infrastructure.Mail.EmailTemplates.WrapForEmail(deepLink, publicBackend);
                 var html = $@"
 <p>Ciao {HttpUtility.HtmlEncode(ext.FirstName)},</p>
