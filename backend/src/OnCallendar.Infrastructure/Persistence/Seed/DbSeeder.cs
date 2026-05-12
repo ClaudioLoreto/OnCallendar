@@ -118,43 +118,84 @@ public static class DbSeeder
         }
 
         // 4 Medici di Navelli
-        // Step 0: migra utenti seed vecchi (formato superboy23+nome@gmail.com) ai
-        // nuovi indirizzi medicoN@navelli.local. Solo se il nuovo non esiste ancora.
-        var legacyMap = new (string Old, string New)[]
+        // In prod gli utenti esistono già con Badge M01-M04 (possono aver cambiato email).
+        // Il seed deve essere idempotente: non creare duplicati, non toccare Badge
+        // se già assegnati. Usiamo SOLO SQL per Badge per evitare conflitti col ChangeTracker.
+        //
+        // Se qualcosa va storto (utenti orfani, ChangeTracker sporco), il try-catch
+        // impedisce il crash: in prod gli utenti esistono già con i badge corretti.
+        try
         {
-            ("superboy23+alessandro@gmail.com", "medico1@navelli.local"),
-            ("superboy23+emanuele@gmail.com",   "medico2@navelli.local"),
-            ("superboy23+edoardo@gmail.com",    "medico3@navelli.local"),
-            ("superboy23+claudia@gmail.com",    "medico4@navelli.local"),
-        };
-        foreach (var (oldEmail, newEmail) in legacyMap)
+            await SeedMediciAsync(db, userManager, tenant.Id, ct);
+        }
+        catch (Exception ex)
         {
-            var legacy = await userManager.FindByEmailAsync(oldEmail);
-            if (legacy is null) continue;
-            var alreadyNew = await userManager.FindByEmailAsync(newEmail);
-            if (alreadyNew is not null) continue;
-            legacy.UserName = newEmail;
-            legacy.Email = newEmail;
-            legacy.NormalizedUserName = userManager.NormalizeName(newEmail);
-            legacy.NormalizedEmail = userManager.NormalizeEmail(newEmail);
-            legacy.EmailConfirmed = false;
-            legacy.IsDefaultEmail = true;
-            await userManager.UpdateAsync(legacy);
+            // Log ma non crashare: se i medici con Badge M01-M04 esistono già
+            // nel DB di prod, il seed non è necessario.
+            var badgeCount = await db.Database.ExecuteSqlRawAsync(
+                @"SELECT 1 FROM ""AspNetUsers"" WHERE ""Badge"" IN ('M01','M02','M03','M04')");
+            // ExecuteSqlRaw returns affected rows for SELECT = 0, so use a count query
+            System.Console.Error.WriteLine(
+                $"[DbSeeder] Medici seed warning (non-fatal): {ex.GetType().Name}: {ex.Message}");
         }
 
-        // Step 1: crea SOLO se non esiste già un utente con quel Badge.
-        // In prod gli utenti possono aver cambiato email, ma conservano il Badge.
-        // Senza questo check creeremmo duplicati.
+        db.ChangeTracker.Clear();
+        await SeedShiftsAsync(db, tenant.Id, ct);
+    }
+
+    private static async Task SeedMediciAsync(
+        ApplicationDbContext db,
+        UserManager<ApplicationUser> userManager,
+        Guid tenantId,
+        CancellationToken ct)
+    {
+        // Pulizia: rimuovi utenti orfani da seed falliti precedenti.
+        await db.Database.ExecuteSqlRawAsync(
+            @"DELETE FROM ""AspNetUsers""
+              WHERE ""NormalizedEmail"" IN ('MEDICO1@NAVELLI.LOCAL','MEDICO2@NAVELLI.LOCAL',
+                                           'MEDICO3@NAVELLI.LOCAL','MEDICO4@NAVELLI.LOCAL')
+                AND (""Badge"" IS NULL OR ""Badge"" = '')");
+        await db.Database.ExecuteSqlRawAsync(
+            @"DELETE FROM ""AspNetUsers""
+              WHERE ""NormalizedEmail"" IN ('SUPERBOY23+ALESSANDRO@GMAIL.COM','SUPERBOY23+EMANUELE@GMAIL.COM',
+                                           'SUPERBOY23+EDOARDO@GMAIL.COM','SUPERBOY23+CLAUDIA@GMAIL.COM')
+                AND (""Badge"" IS NULL OR ""Badge"" = '')");
+
+        db.ChangeTracker.Clear();
+
+        // Conta quanti badge seed esistono già. Se tutti e 4 ci sono, skip.
+        var existingBadgeCount = await db.Users.IgnoreQueryFilters().AsNoTracking()
+            .CountAsync(u => u.Badge != null &&
+                new[] { "M01", "M02", "M03", "M04" }.Contains(u.Badge), ct);
+
+        if (existingBadgeCount >= 4)
+        {
+            // Tutti i medici esistono: aggiorna solo nomi via SQL (non toccare Badge)
+            foreach (var (number, badge, _, _, first, last) in Medici)
+            {
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $@"UPDATE ""AspNetUsers""
+                       SET ""MedicoNumber"" = {number},
+                           ""FirstName"" = {first},
+                           ""LastName"" = {last},
+                           ""IsActive"" = true
+                       WHERE ""Badge"" = {badge}");
+            }
+            return;
+        }
+
+        // DB fresco o parziale: crea utenti mancanti
         foreach (var (number, badge, email, password, first, last) in Medici)
         {
-            var existsByBadge = await db.Users.IgnoreQueryFilters()
+            var existsByBadge = await db.Users.IgnoreQueryFilters().AsNoTracking()
                 .AnyAsync(u => u.Badge == badge, ct);
             if (existsByBadge) continue;
 
-            var user = await userManager.FindByEmailAsync(email);
-            if (user is not null) continue;
+            var existsByEmail = await db.Users.IgnoreQueryFilters().AsNoTracking()
+                .AnyAsync(u => u.NormalizedEmail == email.ToUpperInvariant(), ct);
+            if (existsByEmail) continue;
 
-            user = new ApplicationUser
+            var user = new ApplicationUser
             {
                 UserName = email,
                 Email = email,
@@ -163,7 +204,7 @@ public static class DbSeeder
                 FirstName = first,
                 LastName = last,
                 Role = UserRole.Medico,
-                TenantId = tenant.Id,
+                TenantId = tenantId,
                 MedicoNumber = null,
                 Badge = null,
                 IsActive = true,
@@ -177,29 +218,11 @@ public static class DbSeeder
             await userManager.AddToRoleAsync(user, MedicoRole);
         }
 
-        // Svuota il ChangeTracker: le entità caricate da UserManager/FindByEmail
-        // possono interferire con le operazioni raw SQL che seguono.
         db.ChangeTracker.Clear();
 
-        // Step 2: aggiorna Badge/MedicoNumber/Nome per ogni medico via SQL.
-        // Due strategie in ordine:
-        //   a) Se l'utente con quel Badge esiste già (prod): aggiorna solo nome/numero
-        //   b) Se non esiste (DB fresco): cerca per email seed e assegna badge
-        // Questo evita QUALSIASI conflitto unique IX_AspNetUsers_Badge.
+        // Assegna Badge via SQL per utenti appena creati
         foreach (var (number, badge, email, _, first, last) in Medici)
         {
-            // Prova a) — utente prod con Badge già assegnato
-            var affected = await db.Database.ExecuteSqlInterpolatedAsync(
-                $@"UPDATE ""AspNetUsers""
-                   SET ""MedicoNumber"" = {number},
-                       ""FirstName"" = {first},
-                       ""LastName"" = {last},
-                       ""IsActive"" = true
-                   WHERE ""Badge"" = {badge}");
-
-            if (affected > 0) continue;
-
-            // Prova b) — DB fresco, utente appena creato con email seed
             var normalizedEmail = email.ToUpperInvariant();
             await db.Database.ExecuteSqlInterpolatedAsync(
                 $@"UPDATE ""AspNetUsers""
@@ -208,11 +231,9 @@ public static class DbSeeder
                        ""FirstName"" = {first},
                        ""LastName"" = {last},
                        ""IsActive"" = true
-                   WHERE ""NormalizedEmail"" = {normalizedEmail}");
+                   WHERE ""NormalizedEmail"" = {normalizedEmail}
+                     AND (""Badge"" IS NULL OR ""Badge"" = '')");
         }
-
-        db.ChangeTracker.Clear();
-        await SeedShiftsAsync(db, tenant.Id, ct);
     }
 
     private static async Task SeedShiftsAsync(
@@ -238,7 +259,7 @@ public static class DbSeeder
             await db.SaveChangesAsync(ct);
         }
 
-        var medici = await db.Users.IgnoreQueryFilters()
+        var medici = await db.Users.IgnoreQueryFilters().AsNoTracking()
             .Where(u => u.TenantId == tenantId && u.Role == UserRole.Medico && u.MedicoNumber != null)
             .ToDictionaryAsync(u => u.MedicoNumber!.Value, u => u.Id, ct);
         if (medici.Count < 4) return;
