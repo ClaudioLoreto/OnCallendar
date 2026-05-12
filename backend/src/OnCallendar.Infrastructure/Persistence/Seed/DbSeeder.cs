@@ -144,6 +144,9 @@ public static class DbSeeder
 
             // UPSERT: se Badge esiste, aggiorna solo nomi/numero.
             // Se non esiste, inserisci l'utente completo.
+            // NB: Role è persistito come stringa (HasConversion<string>),
+            //     FK verso RoleTypes.Code → valore = "Medico", non l'int.
+            var roleStr = nameof(UserRole.Medico);
             await db.Database.ExecuteSqlInterpolatedAsync(
                 $@"INSERT INTO ""AspNetUsers"" (
                        ""Id"", ""UserName"", ""NormalizedUserName"",
@@ -159,7 +162,7 @@ public static class DbSeeder
                        {email}, {normalizedEmail}, {false},
                        {passwordHash}, {securityStamp}, {concurrencyStamp},
                        {first}, {last}, {badge}, {number},
-                       {(int)UserRole.Medico}, {tenant.Id}, {true}, {true},
+                       {roleStr}, {tenant.Id}, {true}, {true},
                        {now}, {false},
                        {false}, {false},
                        {true}, {0}
