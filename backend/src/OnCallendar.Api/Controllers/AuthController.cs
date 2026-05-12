@@ -1,16 +1,17 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OnCallendar.Api.Auth;
 using OnCallendar.Application.Common.Interfaces;
 using OnCallendar.Domain.Entities;
+using OnCallendar.Domain.Common;
 using OnCallendar.Domain.Enums;
 using OnCallendar.Infrastructure.Mail;
 using OnCallendar.Infrastructure.Persistence;
-using OnCallendar.Infrastructure.Persistence.Seed;
 using System.Text;
 using System.Web;
 
@@ -18,6 +19,7 @@ namespace OnCallendar.Api.Controllers;
 
 [ApiController]
 [Route("api/auth")]
+[EnableRateLimiting("auth")]
 public sealed class AuthController : ControllerBase
 {
     private readonly UserManager<ApplicationUser> _users;
@@ -117,7 +119,7 @@ public sealed class AuthController : ControllerBase
     /// Non esiste auto-registrazione pubblica.
     /// </summary>
     [HttpPost("register-medico")]
-    [Authorize(Roles = DbSeeder.SuperAdminRole)]
+    [Authorize(Roles = RoleNames.SuperAdmin)]
     public async Task<IActionResult> RegisterMedico([FromBody] RegisterMedicoRequest req)
     {
         var tenant = await _db.Tenants.FindAsync(req.TenantId);
@@ -145,7 +147,7 @@ public sealed class AuthController : ControllerBase
         if (!res.Succeeded)
             return BadRequest(new { errors = res.Errors.Select(e => e.Description) });
 
-        await _users.AddToRoleAsync(user, DbSeeder.MedicoRole);
+        await _users.AddToRoleAsync(user, RoleNames.Medico);
 
         return Created($"/api/users/{user.Id}", new
         {
@@ -333,7 +335,7 @@ public sealed class AuthController : ControllerBase
         if (!res.Succeeded)
             return BadRequest(new { error = string.Join(" ", res.Errors.Select(e => e.Description)) });
 
-        await _users.AddToRoleAsync(user, DbSeeder.MedicoRole);
+        await _users.AddToRoleAsync(user, RoleNames.Medico);
 
         // Collega il medico esterno e disattiva il token: niente più email di invito.
         ext.LinkedUserId = user.Id;

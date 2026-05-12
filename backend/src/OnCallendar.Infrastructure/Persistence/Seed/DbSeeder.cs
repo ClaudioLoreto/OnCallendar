@@ -2,8 +2,10 @@ using System.Reflection;
 using System.Text.Json;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using OnCallendar.Domain.Common;
 using OnCallendar.Domain.Entities;
 using OnCallendar.Domain.Enums;
+using OnCallendar.Domain.Services;
 
 namespace OnCallendar.Infrastructure.Persistence.Seed;
 
@@ -17,8 +19,6 @@ namespace OnCallendar.Infrastructure.Persistence.Seed;
 /// </summary>
 public static class DbSeeder
 {
-    public const string SuperAdminRole = "SuperAdmin";
-    public const string MedicoRole     = "Medico";
 
     public const string AdminEmail    = "admin@oncallendar.local";
     public const string AdminPassword = "Admin#2026!";
@@ -70,7 +70,7 @@ public static class DbSeeder
         }
 
         // Roles
-        foreach (var role in new[] { SuperAdminRole, MedicoRole })
+        foreach (var role in new[] { RoleNames.SuperAdmin, RoleNames.Medico })
         {
             if (!await roleManager.RoleExistsAsync(role))
                 await roleManager.CreateAsync(new IdentityRole<Guid>(role));
@@ -115,7 +115,7 @@ public static class DbSeeder
             if (!res.Succeeded)
                 throw new InvalidOperationException(
                     "Seed admin failed: " + string.Join("; ", res.Errors.Select(e => e.Description)));
-            await userManager.AddToRoleAsync(admin, SuperAdminRole);
+            await userManager.AddToRoleAsync(admin, RoleNames.SuperAdmin);
             db.ChangeTracker.Clear();
         }
 
@@ -223,7 +223,7 @@ public static class DbSeeder
                 throw new InvalidOperationException(
                     $"Seed medico {email} failed: " +
                     string.Join("; ", res.Errors.Select(e => e.Description)));
-            await userManager.AddToRoleAsync(user, MedicoRole);
+            await userManager.AddToRoleAsync(user, RoleNames.Medico);
 
             db.ChangeTracker.Clear();
         }
@@ -289,7 +289,7 @@ public static class DbSeeder
 
             var date = DateOnly.Parse(dateStr);
             var code = ParseCode(codeStr);
-            var (startLocal, endLocal) = ComputeLocalWindow(date, code);
+            var (startLocal, endLocal) = ShiftTimeHelper.ComputeLocalWindow(date, code);
 
             batch.Add(new Shift
             {
@@ -307,21 +307,6 @@ public static class DbSeeder
 
         db.Shifts.AddRange(batch);
         await db.SaveChangesAsync(ct);
-    }
-
-    /// <summary>Calcola gli orari locali (Europe/Rome) di un turno in base al codice.</summary>
-    public static (DateTime startLocal, DateTime endLocal) ComputeLocalWindow(DateOnly date, ShiftCode code)
-    {
-        var d = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
-        return code switch
-        {
-            ShiftCode.F  => (d.AddHours(8),  d.AddHours(20)),
-            ShiftCode.FN => (d.AddHours(20), d.AddDays(1).AddHours(8)),
-            ShiftCode.P  => (d.AddHours(10), d.AddHours(20)),
-            ShiftCode.PN => (d.AddHours(20), d.AddDays(1).AddHours(8)),
-            ShiftCode.N  => (d.AddHours(20), d.AddDays(1).AddHours(8)),
-            _ => throw new ArgumentOutOfRangeException(nameof(code))
-        };
     }
 
     private static ShiftCode ParseCode(string s) => s.ToUpperInvariant() switch

@@ -35,7 +35,8 @@
           "photosPermission": "OnCallendar usa la galleria solo per impostare la tua foto profilo.",
           "cameraPermission": "OnCallendar non usa la fotocamera per la foto profilo."
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "web": {
       "bundler": "metro",

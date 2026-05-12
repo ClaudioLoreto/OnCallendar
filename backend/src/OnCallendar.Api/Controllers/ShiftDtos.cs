@@ -1,7 +1,6 @@
-using Microsoft.AspNetCore.Mvc;
 using OnCallendar.Domain.Entities;
 using OnCallendar.Domain.Enums;
-using OnCallendar.Infrastructure.Persistence.Seed;
+using OnCallendar.Domain.Services;
 
 namespace OnCallendar.Api.Controllers;
 
@@ -38,7 +37,7 @@ public static class ShiftDtos
 
     public static ShiftDto Map(Shift s, Guid currentUid)
     {
-        var (startLocal, endLocal) = DbSeeder.ComputeLocalWindow(s.Date, s.Code);
+        var (startLocal, endLocal) = ShiftTimeHelper.ComputeLocalWindow(s.Date, s.Code);
         return new ShiftDto(
             s.Id,
             s.Date.ToString("yyyy-MM-dd"),

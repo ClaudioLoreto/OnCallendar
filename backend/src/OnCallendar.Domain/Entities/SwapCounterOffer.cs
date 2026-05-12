@@ -1,4 +1,5 @@
 using OnCallendar.Domain.Common;
+using OnCallendar.Domain.Enums;
 
 namespace OnCallendar.Domain.Entities;
 
@@ -26,7 +27,7 @@ public class SwapCounterOffer : BaseEntity, ITenantScoped
     public string? Message { get; set; }
 
     /// <summary>Pending | Accepted | Rejected | Superseded.</summary>
-    public string Status { get; set; } = "Pending";
+    public CounterOfferStatus Status { get; set; } = CounterOfferStatus.Pending;
 
     public DateTime? ResolvedAtUtc { get; set; }
 }

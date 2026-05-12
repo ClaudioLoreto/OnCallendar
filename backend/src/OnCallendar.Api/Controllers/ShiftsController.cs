@@ -3,13 +3,14 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using OnCallendar.Application.Common;
 using OnCallendar.Application.Common.Interfaces;
 using OnCallendar.Application.Common.Services;
 using OnCallendar.Domain.Entities;
 using OnCallendar.Domain.Enums;
+using OnCallendar.Domain.Services;
 using OnCallendar.Infrastructure.Mail;
 using OnCallendar.Infrastructure.Persistence;
-using System.Security.Cryptography;
 using System.Web;
 using static OnCallendar.Api.Controllers.ShiftDtos;
 
@@ -48,8 +49,8 @@ public sealed class ShiftsController : ControllerBase
         [FromQuery] string? from, [FromQuery] string? to)
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
-        var fromDate = TryParseDate(from) ?? DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-7);
-        var toDate   = TryParseDate(to)   ?? DateOnly.FromDateTime(DateTime.UtcNow).AddDays(30);
+        var fromDate = ShiftTimeHelper.TryParseDate(from) ?? DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-7);
+        var toDate   = ShiftTimeHelper.TryParseDate(to)   ?? DateOnly.FromDateTime(DateTime.UtcNow).AddDays(30);
 
         var list = await _db.Shifts
             .Include(s => s.MedicoTurno).Include(s => s.MedicoReperibile).Include(s => s.ExternalDoctor)
@@ -65,8 +66,8 @@ public sealed class ShiftsController : ControllerBase
         [FromQuery] string? from, [FromQuery] string? to)
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
-        var fromDate = TryParseDate(from) ?? DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-30);
-        var toDate   = TryParseDate(to)   ?? DateOnly.FromDateTime(DateTime.UtcNow).AddDays(60);
+        var fromDate = ShiftTimeHelper.TryParseDate(from) ?? DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-30);
+        var toDate   = ShiftTimeHelper.TryParseDate(to)   ?? DateOnly.FromDateTime(DateTime.UtcNow).AddDays(60);
 
         var list = await _db.Shifts
             .Include(s => s.MedicoTurno).Include(s => s.MedicoReperibile).Include(s => s.ExternalDoctor)
@@ -191,7 +192,7 @@ public sealed class ShiftsController : ControllerBase
         {
             try
             {
-                ext.InviteToken = GenerateUrlSafeToken(32);
+                ext.InviteToken = TokenGenerator.GenerateUrlSafeToken(32);
                 ext.InviteSentAtUtc = DateTime.UtcNow;
                 ext.UpdatedAtUtc = DateTime.UtcNow;
 
@@ -253,14 +254,5 @@ public sealed class ShiftsController : ControllerBase
         _audit.Log("Shift", s.Id, $"ClearedExternal:{prev}", s.TenantId);
         await _db.SaveChangesAsync();
         return Ok(Map(s, uid));
-    }
-
-    private static DateOnly? TryParseDate(string? s)
-        => DateOnly.TryParse(s, out var d) ? d : null;
-
-    private static string GenerateUrlSafeToken(int byteLength)
-    {
-        var bytes = RandomNumberGenerator.GetBytes(byteLength);
-        return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 }

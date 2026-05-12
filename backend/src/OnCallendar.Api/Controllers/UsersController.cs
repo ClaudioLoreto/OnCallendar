@@ -4,14 +4,13 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using OnCallendar.Application.Common;
 using OnCallendar.Application.Common.Interfaces;
 using OnCallendar.Application.Common.Services;
 using OnCallendar.Domain.Entities;
 using OnCallendar.Domain.Enums;
 using OnCallendar.Infrastructure.Mail;
 using OnCallendar.Infrastructure.Persistence;
-using OnCallendar.Infrastructure.Persistence.Seed;
-using System.Security.Cryptography;
 using System.Web;
 
 namespace OnCallendar.Api.Controllers;
@@ -162,15 +161,43 @@ public sealed class UsersController : ControllerBase
         if (ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp")
             return BadRequest(new { error = "Formato non supportato (jpg, png, webp)." });
 
+        // Validate content by reading magic bytes
+        var allowedSignatures = new Dictionary<string, byte[][]>
+        {
+            [".jpg"]  = new[] { new byte[] { 0xFF, 0xD8, 0xFF } },
+            [".jpeg"] = new[] { new byte[] { 0xFF, 0xD8, 0xFF } },
+            [".png"]  = new[] { new byte[] { 0x89, 0x50, 0x4E, 0x47 } },
+            [".webp"] = new[] { new byte[] { 0x52, 0x49, 0x46, 0x46 } }, // RIFF
+        };
+        using var ms = new MemoryStream();
+        await file.CopyToAsync(ms);
+        ms.Position = 0;
+        var header = new byte[4];
+        _ = await ms.ReadAsync(header);
+        ms.Position = 0;
+        if (allowedSignatures.TryGetValue(ext, out var sigs)
+            && !sigs.Any(sig => header.AsSpan(0, sig.Length).SequenceEqual(sig)))
+            return BadRequest(new { error = "Il contenuto del file non corrisponde all'estensione." });
+
         var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == uid);
         if (u is null) return NotFound();
+
+        // Elimina vecchio avatar se presente
+        if (!string.IsNullOrEmpty(u.AvatarUrl))
+        {
+            var oldPath = Path.Combine(
+                _env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot"),
+                u.AvatarUrl.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
+            if (System.IO.File.Exists(oldPath))
+                System.IO.File.Delete(oldPath);
+        }
 
         var webRoot = _env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot");
         var dir = Path.Combine(webRoot, "uploads", "avatars");
         Directory.CreateDirectory(dir);
         var fileName = $"{uid}_{DateTime.UtcNow.Ticks}{ext}";
         var fullPath = Path.Combine(dir, fileName);
-        await using (var fs = System.IO.File.Create(fullPath)) { await file.CopyToAsync(fs); }
+        await using (var fs = System.IO.File.Create(fullPath)) { await ms.CopyToAsync(fs); }
 
         u.AvatarUrl = $"/uploads/avatars/{fileName}";
         u.UpdatedAtUtc = DateTime.UtcNow;
@@ -210,7 +237,7 @@ public sealed class UsersController : ControllerBase
             return Conflict(new { error = "Email gia` registrata per un altro utente." });
 
         u.PendingEmail = newEmail;
-        u.EmailChangeToken = GenerateUrlSafeToken(32);
+        u.EmailChangeToken = TokenGenerator.GenerateUrlSafeToken(32);
         u.EmailChangeRequestedAtUtc = DateTime.UtcNow;
         u.UpdatedAtUtc = DateTime.UtcNow;
         await _db.SaveChangesAsync();
@@ -257,12 +284,6 @@ public sealed class UsersController : ControllerBase
 
         _audit.Log("ApplicationUser", u.Id, "EmailChangeRequested", u.TenantId ?? Guid.Empty);
         return Ok(new { ok = true, pendingEmail = newEmail });
-    }
-
-    private static string GenerateUrlSafeToken(int byteLength)
-    {
-        var bytes = RandomNumberGenerator.GetBytes(byteLength);
-        return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
     /// <summary>

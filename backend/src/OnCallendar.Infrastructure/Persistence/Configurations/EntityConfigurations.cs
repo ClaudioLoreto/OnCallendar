@@ -145,6 +145,40 @@ public class SwapRequestConfiguration : IEntityTypeConfiguration<SwapRequest>
             .OnDelete(DeleteBehavior.NoAction);
 
         b.HasIndex(x => new { x.TenantId, x.Status });
+        b.HasIndex(x => new { x.InitiatorShiftId, x.Status });
+    }
+}
+
+public class SwapCounterOfferConfiguration : IEntityTypeConfiguration<SwapCounterOffer>
+{
+    public void Configure(EntityTypeBuilder<SwapCounterOffer> b)
+    {
+        b.ToTable("SwapCounterOffers");
+        b.HasKey(x => x.Id);
+
+        b.Property(x => x.Status)
+            .HasConversion<string>()
+            .HasMaxLength(20)
+            .IsRequired();
+
+        b.Property(x => x.Message).HasMaxLength(1000);
+
+        b.HasOne(x => x.SwapRequest)
+            .WithMany(r => r.CounterOffers)
+            .HasForeignKey(x => x.SwapRequestId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        b.HasOne(x => x.ProposedByMedico)
+            .WithMany()
+            .HasForeignKey(x => x.ProposedByMedicoId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        b.HasOne(x => x.OfferedShift)
+            .WithMany()
+            .HasForeignKey(x => x.OfferedShiftId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => x.SwapRequestId);
     }
 }
 

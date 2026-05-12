@@ -1,3 +1,6 @@
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
+
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -182,6 +185,18 @@ builder.Services.AddSingleton<INotificationTemplateRenderer, NotificationTemplat
 builder.Services.AddScoped<IExpoPushSender, ExpoPushSender>();
 builder.Services.AddScoped<INotificationDispatcher, NotificationDispatcher>();
 
+// Rate limiting per endpoint auth (anti brute-force)
+builder.Services.AddRateLimiter(opt =>
+{
+    opt.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    opt.AddFixedWindowLimiter("auth", o =>
+    {
+        o.PermitLimit = 10;
+        o.Window = TimeSpan.FromMinutes(1);
+        o.QueueLimit = 0;
+    });
+});
+
 builder.Services.AddControllers()
     .AddJsonOptions(opt =>
     {
@@ -252,6 +267,7 @@ app.UseStaticFiles(new StaticFileOptions
 });
 
 app.UseCors(CorsPolicy);
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();

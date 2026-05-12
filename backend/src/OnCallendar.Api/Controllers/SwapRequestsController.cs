@@ -59,7 +59,7 @@ public sealed class SwapRequestsController : ControllerBase
         r.CounterpartMedico is null ? null : $"{r.CounterpartMedico.FirstName} {r.CounterpartMedico.LastName}",
         r.CounterpartShift is null ? null : Brief(r.CounterpartShift),
         r.Message, r.ResolutionReason, r.CreatedAtUtc, r.ResolvedAtUtc,
-        r.CounterOffers?.Count(o => o.Status == "Pending") ?? 0);
+        r.CounterOffers?.Count(o => o.Status == CounterOfferStatus.Pending) ?? 0);
 
     private IQueryable<SwapRequest> LoadSwaps() => _db.SwapRequests
         .Include(r => r.InitiatorMedico)
@@ -681,7 +681,7 @@ public sealed class SwapRequestsController : ControllerBase
     private CounterOfferDto MapOffer(SwapCounterOffer o) => new(
         o.Id, o.SwapRequestId,
         o.ProposedByMedicoId, $"{o.ProposedByMedico.FirstName} {o.ProposedByMedico.LastName}",
-        Brief(o.OfferedShift), o.Message, o.Status, o.CreatedAtUtc, o.ResolvedAtUtc);
+        Brief(o.OfferedShift), o.Message, o.Status.ToString(), o.CreatedAtUtc, o.ResolvedAtUtc);
 
     [HttpGet("{id:guid}/counter-offers")]
     public async Task<ActionResult<IEnumerable<CounterOfferDto>>> ListCounterOffers(Guid id)
@@ -726,11 +726,11 @@ public sealed class SwapRequestsController : ControllerBase
 
         // Marca le controproposte precedenti come superate
         var previous = await _db.SwapCounterOffers
-            .Where(o => o.SwapRequestId == id && o.Status == "Pending")
+            .Where(o => o.SwapRequestId == id && o.Status == CounterOfferStatus.Pending)
             .ToListAsync();
         foreach (var p in previous)
         {
-            p.Status = "Superseded";
+            p.Status = CounterOfferStatus.Superseded;
             p.ResolvedAtUtc = DateTime.UtcNow;
         }
 
@@ -741,7 +741,7 @@ public sealed class SwapRequestsController : ControllerBase
             ProposedByMedicoId = uid,
             OfferedShiftId = shift.Id,
             Message = req.Message,
-            Status = "Pending",
+            Status = CounterOfferStatus.Pending,
             CreatedAtUtc = DateTime.UtcNow,
         };
         _db.SwapCounterOffers.Add(offer);
@@ -792,7 +792,7 @@ public sealed class SwapRequestsController : ControllerBase
             .Include(o => o.OfferedShift).Include(o => o.ProposedByMedico)
             .FirstOrDefaultAsync(o => o.Id == offerId && o.SwapRequestId == swapId);
         if (offer is null) return NotFound();
-        if (offer.Status != "Pending") return BadRequest(new { error = "Controproposta non più valida." });
+        if (offer.Status != CounterOfferStatus.Pending) return BadRequest(new { error = "Controproposta non più valida." });
 
         // Solo l'altra parte può accettare la controproposta
         if (offer.ProposedByMedicoId == uid)
@@ -807,7 +807,7 @@ public sealed class SwapRequestsController : ControllerBase
         swap.CounterpartMedicoId = offer.ProposedByMedicoId;
         swap.CounterpartMedico = offer.ProposedByMedico;
 
-        offer.Status = "Accepted";
+        offer.Status = CounterOfferStatus.Accepted;
         offer.ResolvedAtUtc = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
@@ -830,9 +830,9 @@ public sealed class SwapRequestsController : ControllerBase
         if (offer.ProposedByMedicoId == uid)
             return BadRequest(new { error = "Non puoi rifiutare la tua stessa proposta." });
         if (uid != swap.InitiatorMedicoId && uid != swap.CounterpartMedicoId) return Forbid();
-        if (offer.Status != "Pending") return BadRequest(new { error = "Controproposta non più valida." });
+        if (offer.Status != CounterOfferStatus.Pending) return BadRequest(new { error = "Controproposta non più valida." });
 
-        offer.Status = "Rejected";
+        offer.Status = CounterOfferStatus.Rejected;
         offer.ResolvedAtUtc = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 

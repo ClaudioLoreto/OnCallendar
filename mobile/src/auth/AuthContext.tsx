@@ -1,7 +1,13 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 import apiClient, { setAuthToken, setOnUnauthorized } from '../api/apiClient';
 import { registerForPushNotificationsAsync, unregisterPushAsync } from '../notifications/pushRegistration';
+
+// Token JWT in SecureStore (cifrato) su device nativi, AsyncStorage su web.
+const TOKEN_KEY = 'oncallendar.token';
+const USER_KEY = 'oncallendar.user';
 
 export type AuthUser = {
   userId: string;
@@ -19,7 +25,21 @@ type AuthState = {
   logout: () => Promise<void>;
 };
 
-const STORAGE_KEY = 'oncallendar.auth';
+const isNative = Platform.OS !== 'web';
+
+async function saveToken(token: string) {
+  if (isNative) await SecureStore.setItemAsync(TOKEN_KEY, token);
+  else await AsyncStorage.setItem(TOKEN_KEY, token);
+}
+async function loadToken(): Promise<string | null> {
+  if (isNative) return SecureStore.getItemAsync(TOKEN_KEY);
+  return AsyncStorage.getItem(TOKEN_KEY);
+}
+async function deleteToken() {
+  if (isNative) await SecureStore.deleteItemAsync(TOKEN_KEY);
+  else await AsyncStorage.removeItem(TOKEN_KEY);
+}
+
 const AuthCtx = createContext<AuthState | null>(null);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -35,7 +55,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuthToken(null);
     setToken(null);
     setUser(null);
-    await AsyncStorage.removeItem(STORAGE_KEY);
+    await deleteToken();
+    await AsyncStorage.removeItem(USER_KEY);
   }, []);
 
   // Registra il callback di auto-logout sull'apiClient (gestione 401)
@@ -47,12 +68,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as { token: string; user: AuthUser };
-          setAuthToken(parsed.token);
-          setToken(parsed.token);
-          setUser(parsed.user);
+        const savedToken = await loadToken();
+        const rawUser = await AsyncStorage.getItem(USER_KEY);
+        if (savedToken && rawUser) {
+          const parsed = JSON.parse(rawUser) as AuthUser;
+          setAuthToken(savedToken);
+          setToken(savedToken);
+          setUser(parsed);
           // Refresh push token al riavvio (best effort).
           void registerForPushNotificationsAsync().then(t => { pushTokenRef.current = t; });
         }
@@ -74,7 +96,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuthToken(data.token);
     setToken(data.token);
     setUser(u);
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ token: data.token, user: u }));
+    await saveToken(data.token);
+    await AsyncStorage.setItem(USER_KEY, JSON.stringify(u));
     // Registra il device per le push (best effort).
     void registerForPushNotificationsAsync().then(t => { pushTokenRef.current = t; });
   }, []);

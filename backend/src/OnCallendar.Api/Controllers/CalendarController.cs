@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using OnCallendar.Application.Common.Interfaces;
+using OnCallendar.Domain.Services;
 using OnCallendar.Infrastructure.Persistence;
 using static OnCallendar.Api.Controllers.ShiftDtos;
 
@@ -36,8 +37,8 @@ public sealed class CalendarController : ControllerBase
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
 
-        var fromDate = TryParseDate(from) ?? DateOnly.FromDateTime(DateTime.UtcNow);
-        var toDate   = TryParseDate(to)   ?? fromDate.AddDays(14);
+        var fromDate = ShiftTimeHelper.TryParseDate(from) ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var toDate   = ShiftTimeHelper.TryParseDate(to)   ?? fromDate.AddDays(14);
         if (toDate < fromDate) (fromDate, toDate) = (toDate, fromDate);
 
         var shifts = await _db.Shifts
@@ -58,7 +59,4 @@ public sealed class CalendarController : ControllerBase
 
         return Ok(grouped);
     }
-
-    private static DateOnly? TryParseDate(string? s)
-        => DateOnly.TryParse(s, out var d) ? d : null;
 }
