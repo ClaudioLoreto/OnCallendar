@@ -1,9 +1,9 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using OnCallendar.Api.Contracts;
 using OnCallendar.Application.Common.Interfaces;
 using OnCallendar.Domain.Services;
-using OnCallendar.Infrastructure.Persistence;
 using static OnCallendar.Api.Controllers.ShiftDtos;
 
 namespace OnCallendar.Api.Controllers;
@@ -17,15 +17,13 @@ namespace OnCallendar.Api.Controllers;
 [Authorize]
 public sealed class CalendarController : ControllerBase
 {
-    private readonly ApplicationDbContext _db;
+    private readonly IApplicationDbContext _db;
     private readonly ICurrentUserService _user;
 
-    public CalendarController(ApplicationDbContext db, ICurrentUserService user)
+    public CalendarController(IApplicationDbContext db, ICurrentUserService user)
     {
         _db = db; _user = user;
     }
-
-    public sealed record DayDto(string Date, IReadOnlyList<ShiftDto> Shifts);
 
     /// <summary>
     /// Restituisce i turni nella finestra [from, to] (default: oggi → +14 giorni).

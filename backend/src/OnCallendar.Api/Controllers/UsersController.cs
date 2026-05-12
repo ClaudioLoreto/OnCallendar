@@ -4,13 +4,13 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using OnCallendar.Api.Contracts;
 using OnCallendar.Application.Common;
 using OnCallendar.Application.Common.Interfaces;
 using OnCallendar.Application.Common.Services;
 using OnCallendar.Domain.Entities;
 using OnCallendar.Domain.Enums;
 using OnCallendar.Infrastructure.Mail;
-using OnCallendar.Infrastructure.Persistence;
 using System.Web;
 
 namespace OnCallendar.Api.Controllers;
@@ -20,7 +20,7 @@ namespace OnCallendar.Api.Controllers;
 [Authorize]
 public sealed class UsersController : ControllerBase
 {
-    private readonly ApplicationDbContext _db;
+    private readonly IApplicationDbContext _db;
     private readonly ICurrentUserService _user;
     private readonly UserManager<ApplicationUser> _users;
     private readonly IAuditLogger _audit;
@@ -30,7 +30,7 @@ public sealed class UsersController : ControllerBase
     private readonly ILogger<UsersController> _logger;
 
     public UsersController(
-        ApplicationDbContext db,
+        IApplicationDbContext db,
         ICurrentUserService user,
         UserManager<ApplicationUser> users,
         IAuditLogger audit,
@@ -43,8 +43,6 @@ public sealed class UsersController : ControllerBase
         _email = email; _mail = mailOpt.Value; _logger = logger;
     }
 
-    public sealed record MedicoDto(Guid Id, string FullName, string Email, string? AvatarUrl);
-
     [HttpGet("medici")]
     public async Task<ActionResult<IEnumerable<MedicoDto>>> Medici()
     {
@@ -55,15 +53,6 @@ public sealed class UsersController : ControllerBase
             .ToListAsync();
         return Ok(list);
     }
-
-    public sealed record MeDto(
-        Guid Id, string Email, string FirstName, string LastName,
-        string? Phone, string? AvatarUrl,
-        string PreferredLanguage, string ThemePreference,
-        bool EmailConfirmed, bool PhoneConfirmed,
-        bool IsDefaultEmail, string? PendingEmail,
-        bool PasswordChangeRequired, bool PasswordExpired,
-        DateTime? PasswordChangedAtUtc);
 
     private static MeDto Map(ApplicationUser u)
     {
@@ -94,11 +83,6 @@ public sealed class UsersController : ControllerBase
         return Ok(Map(u));
     }
 
-    public sealed record UpdateMeRequest(
-        string? FirstName, string? LastName,
-        string? Email, string? Phone, string? AvatarUrl,
-        string? PreferredLanguage, string? ThemePreference);
-
     [HttpPatch("me")]
     public async Task<ActionResult<MeDto>> UpdateMe([FromBody] UpdateMeRequest req)
     {
@@ -127,8 +111,6 @@ public sealed class UsersController : ControllerBase
         await _db.SaveChangesAsync();
         return Ok(Map(u));
     }
-
-    public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 
     [HttpPost("me/change-password")]
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest req)
@@ -205,8 +187,6 @@ public sealed class UsersController : ControllerBase
         await _db.SaveChangesAsync();
         return Ok(Map(u));
     }
-
-    public sealed record RequestEmailChangeRequest(string NewEmail, string? ClientCallbackUrl = null);
 
     /// <summary>
     /// Richiede il cambio email: invia un link di conferma al NUOVO indirizzo.

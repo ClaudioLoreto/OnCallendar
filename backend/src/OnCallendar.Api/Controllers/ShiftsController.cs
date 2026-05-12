@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using OnCallendar.Api.Contracts;
 using OnCallendar.Application.Common;
 using OnCallendar.Application.Common.Interfaces;
 using OnCallendar.Application.Common.Services;
@@ -10,7 +11,6 @@ using OnCallendar.Domain.Entities;
 using OnCallendar.Domain.Enums;
 using OnCallendar.Domain.Services;
 using OnCallendar.Infrastructure.Mail;
-using OnCallendar.Infrastructure.Persistence;
 using System.Web;
 using static OnCallendar.Api.Controllers.ShiftDtos;
 
@@ -24,7 +24,7 @@ namespace OnCallendar.Api.Controllers;
 [Authorize]
 public sealed class ShiftsController : ControllerBase
 {
-    private readonly ApplicationDbContext _db;
+    private readonly IApplicationDbContext _db;
     private readonly ICurrentUserService _user;
     private readonly IAuditLogger _audit;
     private readonly IEmailSender _email;
@@ -32,7 +32,7 @@ public sealed class ShiftsController : ControllerBase
     private readonly ILogger<ShiftsController> _logger;
 
     public ShiftsController(
-        ApplicationDbContext db,
+        IApplicationDbContext db,
         ICurrentUserService user,
         IAuditLogger audit,
         IEmailSender email,
@@ -115,8 +115,6 @@ public sealed class ShiftsController : ControllerBase
         await _db.SaveChangesAsync();
         return NoContent();
     }
-
-    public sealed record AssignExternalRequest(string FirstName, string LastName, string? Phone, string? Email);
 
     /// <summary>
     /// Assegna il turno a un medico ESTERNO (non utente dell'app). Se il

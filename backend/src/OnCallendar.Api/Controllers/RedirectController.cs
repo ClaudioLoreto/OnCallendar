@@ -2,8 +2,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using OnCallendar.Application.Common.Interfaces;
 using OnCallendar.Domain.Entities;
-using OnCallendar.Infrastructure.Persistence;
 using System.Text;
 using System.Web;
 
@@ -28,10 +28,10 @@ namespace OnCallendar.Api.Controllers;
 [AllowAnonymous]
 public sealed class RedirectController : ControllerBase
 {
-    private readonly ApplicationDbContext _db;
+    private readonly IApplicationDbContext _db;
     private readonly UserManager<ApplicationUser> _users;
 
-    public RedirectController(ApplicationDbContext db, UserManager<ApplicationUser> users)
+    public RedirectController(IApplicationDbContext db, UserManager<ApplicationUser> users)
     {
         _db = db;
         _users = users;

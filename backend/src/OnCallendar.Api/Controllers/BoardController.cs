@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using OnCallendar.Application.Common.Interfaces;
 using OnCallendar.Domain.Enums;
-using OnCallendar.Infrastructure.Persistence;
 using static OnCallendar.Api.Controllers.ShiftDtos;
 
 namespace OnCallendar.Api.Controllers;
@@ -16,10 +15,10 @@ namespace OnCallendar.Api.Controllers;
 [Authorize]
 public sealed class BoardController : ControllerBase
 {
-    private readonly ApplicationDbContext _db;
+    private readonly IApplicationDbContext _db;
     private readonly ICurrentUserService _user;
 
-    public BoardController(ApplicationDbContext db, ICurrentUserService user)
+    public BoardController(IApplicationDbContext db, ICurrentUserService user)
     {
         _db = db; _user = user;
     }

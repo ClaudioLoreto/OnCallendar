@@ -1,8 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using OnCallendar.Api.Contracts;
 using OnCallendar.Application.Common.Interfaces;
-using OnCallendar.Infrastructure.Persistence;
 
 namespace OnCallendar.Api.Controllers;
 
@@ -15,15 +15,13 @@ namespace OnCallendar.Api.Controllers;
 [Authorize]
 public sealed class ExternalDoctorsController : ControllerBase
 {
-    private readonly ApplicationDbContext _db;
+    private readonly IApplicationDbContext _db;
     private readonly ICurrentUserService _user;
 
-    public ExternalDoctorsController(ApplicationDbContext db, ICurrentUserService user)
+    public ExternalDoctorsController(IApplicationDbContext db, ICurrentUserService user)
     {
         _db = db; _user = user;
     }
-
-    public sealed record ExternalDoctorDto(Guid Id, string FirstName, string LastName, string FullName, string? Phone);
 
     /// <summary>
     /// Suggerimenti per autocomplete. Filtra per match (case-insensitive)

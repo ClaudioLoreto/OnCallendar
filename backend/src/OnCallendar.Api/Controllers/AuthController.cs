@@ -3,15 +3,14 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OnCallendar.Api.Auth;
+using OnCallendar.Api.Contracts;
 using OnCallendar.Application.Common.Interfaces;
-using OnCallendar.Domain.Entities;
 using OnCallendar.Domain.Common;
+using OnCallendar.Domain.Entities;
 using OnCallendar.Domain.Enums;
 using OnCallendar.Infrastructure.Mail;
-using OnCallendar.Infrastructure.Persistence;
 using System.Text;
 using System.Web;
 
@@ -25,7 +24,7 @@ public sealed class AuthController : ControllerBase
     private readonly UserManager<ApplicationUser> _users;
     private readonly SignInManager<ApplicationUser> _signIn;
     private readonly IJwtTokenService _jwt;
-    private readonly ApplicationDbContext _db;
+    private readonly IApplicationDbContext _db;
     private readonly IEmailSender _email;
     private readonly MailSettings _mail;
     private readonly IWebHostEnvironment _env;
@@ -35,7 +34,7 @@ public sealed class AuthController : ControllerBase
         UserManager<ApplicationUser> users,
         SignInManager<ApplicationUser> signIn,
         IJwtTokenService jwt,
-        ApplicationDbContext db,
+        IApplicationDbContext db,
         IEmailSender email,
         IOptions<MailSettings> mailOpt,
         IWebHostEnvironment env,
@@ -50,17 +49,6 @@ public sealed class AuthController : ControllerBase
         _env = env;
         _logger = logger;
     }
-
-    public sealed record LoginRequest(string Email, string Password);
-    public sealed record LoginResponse(
-        string Token,
-        DateTime ExpiresAtUtc,
-        Guid UserId,
-        string Email,
-        string FullName,
-        string Role,
-        Guid? TenantId,
-        bool PasswordExpired);
 
     /// <summary>
     /// Login pubblico (medici e SuperAdmin).
@@ -104,15 +92,6 @@ public sealed class AuthController : ControllerBase
             token, exp, user.Id, user.Email!, $"{user.FirstName} {user.LastName}",
             user.Role.ToString(), user.TenantId, passwordExpired));
     }
-
-    public sealed record RegisterMedicoRequest(
-        string Email,
-        string Password,
-        string FirstName,
-        string LastName,
-        Guid TenantId,
-        string? FiscalCode = null,
-        string? MedicalRegistrationNumber = null);
 
     /// <summary>
     /// Registrazione di un nuovo medico — riservata al SuperAdmin.
@@ -175,8 +154,6 @@ public sealed class AuthController : ControllerBase
             Roles = roles
         });
     }
-
-    public sealed record ForgotPasswordRequest(string Email, string? ClientCallbackUrl = null);
 
     /// <summary>
     /// Avvia la procedura di reset password: genera un token Identity (1 ora di validita`)
@@ -241,8 +218,6 @@ public sealed class AuthController : ControllerBase
         return Ok(new { ok = true });
     }
 
-    public sealed record ResetPasswordRequest(string Email, string Token, string NewPassword);
-
     /// <summary>
     /// Completa il reset password. Riceve email + token (base64) + nuova password.
     /// </summary>
@@ -292,8 +267,6 @@ public sealed class AuthController : ControllerBase
             return BadRequest(new { error = "Questo invito è già stato utilizzato." });
         return Ok(new ExternalInviteInfoDto(ext.FirstName, ext.LastName, ext.Email));
     }
-
-    public sealed record RegisterExternalRequest(string Token, string Email, string Password);
 
     /// <summary>
     /// Completa la registrazione di un medico esterno tramite token di invito.
@@ -349,8 +322,6 @@ public sealed class AuthController : ControllerBase
         return Ok(new { ok = true });
     }
 
-    public sealed record ConfirmEmailChangeRequest(string Token);
-
     /// <summary>
     /// Conferma un cambio email precedentemente richiesto via /api/users/me/request-email-change.
     /// Promuove PendingEmail a Email ufficiale e marca EmailConfirmed = true,
@@ -399,8 +370,6 @@ public sealed class AuthController : ControllerBase
         _logger.LogInformation("[Auth/ConfirmEmailChange] Email confermata per utente {UserId}: {Email}", u.Id, pending);
         return Ok(new { ok = true, email = pending });
     }
-
-    public sealed record DevResetPasswordRequest(string Email, string NewPassword);
 
     /// <summary>
     /// DEV ONLY: resetta la password di un utente senza token email.

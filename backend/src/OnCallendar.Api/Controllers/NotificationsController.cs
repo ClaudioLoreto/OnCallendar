@@ -1,10 +1,10 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using OnCallendar.Api.Contracts;
 using OnCallendar.Application.Common.Interfaces;
 using OnCallendar.Domain.Entities;
 using OnCallendar.Domain.Notifications;
-using OnCallendar.Infrastructure.Persistence;
 
 namespace OnCallendar.Api.Controllers;
 
@@ -13,17 +13,13 @@ namespace OnCallendar.Api.Controllers;
 [Authorize]
 public sealed class NotificationsController : ControllerBase
 {
-    private readonly ApplicationDbContext _db;
+    private readonly IApplicationDbContext _db;
     private readonly ICurrentUserService _user;
 
-    public NotificationsController(ApplicationDbContext db, ICurrentUserService user)
+    public NotificationsController(IApplicationDbContext db, ICurrentUserService user)
     {
         _db = db; _user = user;
     }
-
-    public sealed record NotificationDto(
-        Guid Id, string Type, string? Title, string Message, string? Category,
-        bool IsRead, Guid? RelatedEntityId, string? DataJson, DateTime CreatedAtUtc);
 
     /// <summary>Ultime 20 notifiche dell'utente (non lette prima).</summary>
     [HttpGet]
@@ -79,8 +75,6 @@ public sealed class NotificationsController : ControllerBase
     // l'override esplicito in NotificationPreferences.
     // ----------------------------------------------------------------------
 
-    public sealed record PreferenceDto(string Type, string Channel, bool Enabled);
-
     [HttpGet("preferences")]
     public async Task<ActionResult<IEnumerable<PreferenceDto>>> GetPreferences()
     {
@@ -103,8 +97,6 @@ public sealed class NotificationsController : ControllerBase
         }
         return Ok(result);
     }
-
-    public sealed record SetPreferenceRequest(string Type, string Channel, bool Enabled);
 
     [HttpPut("preferences")]
     public async Task<IActionResult> SetPreference([FromBody] SetPreferenceRequest req)

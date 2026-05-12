@@ -1,13 +1,13 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using OnCallendar.Api.Contracts;
 using OnCallendar.Application.Common.Interfaces;
 using OnCallendar.Application.Common.Services;
 using OnCallendar.Domain.Entities;
 using OnCallendar.Domain.Enums;
 using OnCallendar.Domain.Notifications;
 using OnCallendar.Domain.Services;
-using OnCallendar.Infrastructure.Persistence;
 
 namespace OnCallendar.Api.Controllers;
 
@@ -20,33 +20,19 @@ namespace OnCallendar.Api.Controllers;
 [Authorize]
 public sealed class SwapRequestsController : ControllerBase
 {
-    private readonly ApplicationDbContext _db;
+    private readonly IApplicationDbContext _db;
     private readonly ICurrentUserService _user;
     private readonly IShiftValidationService _rules;
     private readonly IAuditLogger _audit;
     private readonly INotificationDispatcher _dispatcher;
 
     public SwapRequestsController(
-        ApplicationDbContext db, ICurrentUserService user,
+        IApplicationDbContext db, ICurrentUserService user,
         IShiftValidationService rules, IAuditLogger audit,
         INotificationDispatcher dispatcher)
     {
         _db = db; _user = user; _rules = rules; _audit = audit; _dispatcher = dispatcher;
     }
-
-    public sealed record ShiftBriefDto(
-        Guid Id, string Date, string Code,
-        DateTime StartUtc, DateTime EndUtc);
-
-    public sealed record SwapDto(
-        Guid Id, SwapRequestType Type, SwapRequestStatus Status,
-        Guid InitiatorId, string InitiatorName,
-        ShiftBriefDto InitiatorShift,
-        Guid? CounterpartId, string? CounterpartName,
-        ShiftBriefDto? CounterpartShift,
-        string? Message, string? ResolutionReason,
-        DateTime CreatedAtUtc, DateTime? ResolvedAtUtc,
-        int PendingCounterOffersCount);
 
     private static ShiftBriefDto Brief(Shift s) => new(
         s.Id, s.Date.ToString("yyyy-MM-dd"), s.Code.ToString(), s.StartUtc, s.EndUtc);
@@ -123,7 +109,6 @@ public sealed class SwapRequestsController : ControllerBase
     }
 
     // ---------- CREATE ----------
-    public sealed record CreateGiveawayRequest(Guid ShiftId, Guid ToMedicoId, string? Message);
 
     [HttpPost("giveaway")]
     public async Task<ActionResult<SwapDto>> CreateGiveaway([FromBody] CreateGiveawayRequest req)
@@ -173,10 +158,7 @@ public sealed class SwapRequestsController : ControllerBase
         return Ok(await ReloadDto(swap.Id));
     }
 
-    public sealed record CreateSwapRequest(Guid MyShiftId, Guid OtherShiftId, string? Message);
-
     // ---------- MULTI-DESTINATARIO GIVEAWAY ----------
-    public sealed record CreateMultiGiveawayRequest(Guid ShiftId, List<Guid> RecipientIds, string? Message);
 
     /// <summary>
     /// Crea una cessione verso uno o più colleghi contemporaneamente.
@@ -307,7 +289,6 @@ public sealed class SwapRequestsController : ControllerBase
     }
 
     // ---------- MULTI-DESTINATARIO SWAP ----------
-    public sealed record CreateMultiSwapRequest(Guid MyShiftId, List<Guid> CandidateShiftIds, string? Message);
 
     /// <summary>
     /// Propone uno scambio del proprio turno verso più candidati contemporaneamente:
@@ -435,8 +416,6 @@ public sealed class SwapRequestsController : ControllerBase
     [HttpPost("{id:guid}/accept")]
     public Task<ActionResult<SwapDto>> Accept(Guid id, [FromQuery] bool force = false)
         => ResolveAcceptance(id, force);
-
-    public sealed record RejectBody(string? Reason);
 
     [HttpPost("{id:guid}/reject")]
     public async Task<ActionResult<SwapDto>> Reject(Guid id, [FromBody] RejectBody? body)
@@ -671,13 +650,6 @@ public sealed class SwapRequestsController : ControllerBase
 
     // ---------- TRATTATIVE / CONTROPROPOSTE ----------
 
-    public sealed record CounterOfferDto(
-        Guid Id, Guid SwapRequestId,
-        Guid ProposedById, string ProposedByName,
-        ShiftBriefDto OfferedShift,
-        string? Message, string Status,
-        DateTime CreatedAtUtc, DateTime? ResolvedAtUtc);
-
     private CounterOfferDto MapOffer(SwapCounterOffer o) => new(
         o.Id, o.SwapRequestId,
         o.ProposedByMedicoId, $"{o.ProposedByMedico.FirstName} {o.ProposedByMedico.LastName}",
@@ -699,8 +671,6 @@ public sealed class SwapRequestsController : ControllerBase
             .ToListAsync();
         return Ok(offers.Select(MapOffer));
     }
-
-    public sealed record CreateCounterOfferRequest(Guid OfferedShiftId, string? Message);
 
     /// <summary>
     /// Propone un turno DIVERSO al posto di quello richiesto.

@@ -1,9 +1,9 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using OnCallendar.Api.Contracts;
 using OnCallendar.Application.Common.Interfaces;
 using OnCallendar.Domain.Entities;
-using OnCallendar.Infrastructure.Persistence;
 
 namespace OnCallendar.Api.Controllers;
 
@@ -17,22 +17,20 @@ namespace OnCallendar.Api.Controllers;
 [Authorize]
 public sealed class DeviceTokensController : ControllerBase
 {
-    private readonly ApplicationDbContext _db;
+    private readonly IApplicationDbContext _db;
     private readonly ICurrentUserService _user;
 
-    public DeviceTokensController(ApplicationDbContext db, ICurrentUserService user)
+    public DeviceTokensController(IApplicationDbContext db, ICurrentUserService user)
     {
         _db = db; _user = user;
     }
-
-    public sealed record RegisterRequest(string Token, string Platform, string? DeviceName);
 
     /// <summary>
     /// Upsert del token: se esiste già per questo utente lo riattiva e aggiorna
     /// platform/deviceName/lastSeen, altrimenti lo crea.
     /// </summary>
     [HttpPost]
-    public async Task<IActionResult> Register([FromBody] RegisterRequest req)
+    public async Task<IActionResult> Register([FromBody] RegisterDeviceRequest req)
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
         if (string.IsNullOrWhiteSpace(req.Token))
