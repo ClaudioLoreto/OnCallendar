@@ -132,7 +132,7 @@ public static class DbSeeder
             var legacy = await userManager.FindByEmailAsync(oldEmail);
             if (legacy is null) continue;
             var alreadyNew = await userManager.FindByEmailAsync(newEmail);
-            if (alreadyNew is not null) continue; // qualcuno ha già il nuovo, lascio stare
+            if (alreadyNew is not null) continue;
             legacy.UserName = newEmail;
             legacy.Email = newEmail;
             legacy.NormalizedUserName = userManager.NormalizeName(newEmail);
@@ -142,57 +142,64 @@ public static class DbSeeder
             await userManager.UpdateAsync(legacy);
         }
 
-        // Step 1: crea quelli che non esistono ancora.
+        // Step 1: crea SOLO se non esiste già un utente con quel Badge.
+        // In prod gli utenti possono aver cambiato email, ma conservano il Badge.
+        // Senza questo check creeremmo duplicati.
         foreach (var (number, badge, email, password, first, last) in Medici)
         {
+            var existsByBadge = await db.Users.IgnoreQueryFilters()
+                .AnyAsync(u => u.Badge == badge, ct);
+            if (existsByBadge) continue;
+
             var user = await userManager.FindByEmailAsync(email);
-            if (user is null)
+            if (user is not null) continue;
+
+            user = new ApplicationUser
             {
-                user = new ApplicationUser
-                {
-                    UserName = email,
-                    Email = email,
-                    EmailConfirmed = false,
-                    IsDefaultEmail = true,
-                    FirstName = first,
-                    LastName = last,
-                    Role = UserRole.Medico,
-                    TenantId = tenant.Id,
-                    MedicoNumber = null, // assegnato in step 3 per evitare conflitti unique
-                    Badge = null,
-                    IsActive = true,
-                    CreatedAtUtc = DateTime.UtcNow,
-                };
-                var res = await userManager.CreateAsync(user, password);
-                if (!res.Succeeded)
-                    throw new InvalidOperationException(
-                        $"Seed medico {email} failed: " +
-                        string.Join("; ", res.Errors.Select(e => e.Description)));
-                await userManager.AddToRoleAsync(user, MedicoRole);
-            }
+                UserName = email,
+                Email = email,
+                EmailConfirmed = false,
+                IsDefaultEmail = true,
+                FirstName = first,
+                LastName = last,
+                Role = UserRole.Medico,
+                TenantId = tenant.Id,
+                MedicoNumber = null,
+                Badge = null,
+                IsActive = true,
+                CreatedAtUtc = DateTime.UtcNow,
+            };
+            var res = await userManager.CreateAsync(user, password);
+            if (!res.Succeeded)
+                throw new InvalidOperationException(
+                    $"Seed medico {email} failed: " +
+                    string.Join("; ", res.Errors.Select(e => e.Description)));
+            await userManager.AddToRoleAsync(user, MedicoRole);
         }
 
-        // Step 2+3 combinati: assegna Badge/MedicoNumber interamente via SQL.
-        // Il ChangeTracker di EF e UserManager possono avere entità sporche dopo
-        // Step 1, quindi usiamo SQL diretto per evitare QUALSIASI conflitto
-        // con il vincolo unique IX_AspNetUsers_Badge.
+        // Svuota il ChangeTracker: le entità caricate da UserManager/FindByEmail
+        // possono interferire con le operazioni raw SQL che seguono.
+        db.ChangeTracker.Clear();
 
-        // Prima: azzera TUTTI i Badge (non solo M01-M04, qualsiasi valore)
-        // sugli utenti seed per email O per badge. Questo copre:
-        //  - utenti che non hanno cambiato email (trovati per email)
-        //  - utenti che hanno cambiato email (trovati per badge)
-        await db.Database.ExecuteSqlRawAsync(
-            @"UPDATE ""AspNetUsers""
-              SET ""Badge"" = NULL, ""MedicoNumber"" = NULL
-              WHERE ""Badge"" IN ('M01','M02','M03','M04')
-                 OR ""NormalizedEmail"" IN ('MEDICO1@NAVELLI.LOCAL','MEDICO2@NAVELLI.LOCAL',
-                                           'MEDICO3@NAVELLI.LOCAL','MEDICO4@NAVELLI.LOCAL')");
-
-        // Poi: assegna Badge/MedicoNumber uno alla volta via SQL.
-        // Ogni UPDATE tocca esattamente 1 riga (per NormalizedEmail).
-        // Non tocchiamo Role/TenantId: sono già corretti da CreateAsync in Step 1.
+        // Step 2: aggiorna Badge/MedicoNumber/Nome per ogni medico via SQL.
+        // Due strategie in ordine:
+        //   a) Se l'utente con quel Badge esiste già (prod): aggiorna solo nome/numero
+        //   b) Se non esiste (DB fresco): cerca per email seed e assegna badge
+        // Questo evita QUALSIASI conflitto unique IX_AspNetUsers_Badge.
         foreach (var (number, badge, email, _, first, last) in Medici)
         {
+            // Prova a) — utente prod con Badge già assegnato
+            var affected = await db.Database.ExecuteSqlInterpolatedAsync(
+                $@"UPDATE ""AspNetUsers""
+                   SET ""MedicoNumber"" = {number},
+                       ""FirstName"" = {first},
+                       ""LastName"" = {last},
+                       ""IsActive"" = true
+                   WHERE ""Badge"" = {badge}");
+
+            if (affected > 0) continue;
+
+            // Prova b) — DB fresco, utente appena creato con email seed
             var normalizedEmail = email.ToUpperInvariant();
             await db.Database.ExecuteSqlInterpolatedAsync(
                 $@"UPDATE ""AspNetUsers""
@@ -201,13 +208,10 @@ public static class DbSeeder
                        ""FirstName"" = {first},
                        ""LastName"" = {last},
                        ""IsActive"" = true
-                   WHERE ""NormalizedEmail"" = {normalizedEmail}", ct);
+                   WHERE ""NormalizedEmail"" = {normalizedEmail}");
         }
 
-        // Svuota il ChangeTracker: le entità caricate da UserManager in Step 1
-        // hanno dati stale (Badge=null) rispetto al DB (Badge=M0x).
         db.ChangeTracker.Clear();
-
         await SeedShiftsAsync(db, tenant.Id, ct);
     }
 
