@@ -12,6 +12,7 @@ using Microsoft.OpenApi.Models;
 using OnCallendar.Api.Auth;
 using OnCallendar.Api.Services;
 using OnCallendar.Api;
+using OnCallendar.Application.Common;
 using OnCallendar.Application.Common.Interfaces;
 using OnCallendar.Application.Common.Services;
 using OnCallendar.Domain.Entities;
@@ -163,6 +164,9 @@ builder.Services.AddAuthorization();
 
 // Domain services
 builder.Services.AddScoped<IShiftValidationService, ShiftValidationService>();
+
+// Application services
+builder.Services.AddScoped<ISwapService, SwapService>();
 
 // Mail (Resend via API HTTP, oppure SMTP via MailKit). Sezione "Mail" in appsettings.
 builder.Services.Configure<MailSettings>(builder.Configuration.GetSection("Mail"));
