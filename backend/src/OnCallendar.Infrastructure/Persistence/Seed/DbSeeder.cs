@@ -120,130 +120,70 @@ public static class DbSeeder
         }
 
         // ── 4 Medici di Navelli ──────────────────────────────────────────
-        // Strategia: se QUALSIASI utente medico esiste già nel DB
-        // (controllato per Role, non per Badge — più robusto),
-        // usiamo SOLO SQL UPDATE puro. ZERO chiamate a UserManager,
-        // ZERO SaveChangesAsync, ZERO ChangeTracker per evitare
-        // IX_AspNetUsers_Badge conflicts.
+        // Strategia: PURO SQL via PostgreSQL UPSERT (INSERT ON CONFLICT).
+        // ZERO UserManager, ZERO ChangeTracker, ZERO rischi di
+        // IX_AspNetUsers_Badge. Funziona sia su DB fresco che esistente.
         db.ChangeTracker.Clear();
 
-        var hasMedici = await db.Users.IgnoreQueryFilters().AsNoTracking()
-            .AnyAsync(u => u.Role == UserRole.Medico, ct);
+        // Ensure ruolo "Medico" esiste (raw SQL, idempotente)
+        var medicoRoleId = await db.Database.SqlQuery<Guid>(
+            $@"SELECT ""Id"" AS ""Value"" FROM ""AspNetRoles""
+               WHERE ""NormalizedName"" = 'MEDICO'").FirstOrDefaultAsync(ct);
 
-        if (hasMedici)
+        var hasher = new PasswordHasher<ApplicationUser>();
+        var dummyUser = new ApplicationUser();
+
+        foreach (var (number, badge, email, password, first, last) in Medici)
         {
-            // DB esistente (prod): aggiorna nomi/badge via SQL puro.
-            foreach (var (number, badge, _, _, first, last) in Medici)
+            var passwordHash = hasher.HashPassword(dummyUser, password);
+            var normalizedEmail = email.ToUpperInvariant();
+            var now = DateTime.UtcNow;
+            var newId = Guid.NewGuid();
+            var securityStamp = Guid.NewGuid().ToString();
+            var concurrencyStamp = Guid.NewGuid().ToString();
+
+            // UPSERT: se Badge esiste, aggiorna solo nomi/numero.
+            // Se non esiste, inserisci l'utente completo.
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $@"INSERT INTO ""AspNetUsers"" (
+                       ""Id"", ""UserName"", ""NormalizedUserName"",
+                       ""Email"", ""NormalizedEmail"", ""EmailConfirmed"",
+                       ""PasswordHash"", ""SecurityStamp"", ""ConcurrencyStamp"",
+                       ""FirstName"", ""LastName"", ""Badge"", ""MedicoNumber"",
+                       ""Role"", ""TenantId"", ""IsActive"", ""IsDefaultEmail"",
+                       ""CreatedAtUtc"", ""IsDeleted"",
+                       ""PhoneNumberConfirmed"", ""TwoFactorEnabled"",
+                       ""LockoutEnabled"", ""AccessFailedCount""
+                   ) VALUES (
+                       {newId}, {email}, {normalizedEmail},
+                       {email}, {normalizedEmail}, {false},
+                       {passwordHash}, {securityStamp}, {concurrencyStamp},
+                       {first}, {last}, {badge}, {number},
+                       {(int)UserRole.Medico}, {tenant.Id}, {true}, {true},
+                       {now}, {false},
+                       {false}, {false},
+                       {true}, {0}
+                   )
+                   ON CONFLICT (""Badge"") DO UPDATE SET
+                       ""MedicoNumber"" = EXCLUDED.""MedicoNumber"",
+                       ""FirstName""   = EXCLUDED.""FirstName"",
+                       ""LastName""    = EXCLUDED.""LastName"",
+                       ""IsActive""    = true");
+
+            // Assegna ruolo Medico (idempotente)
+            if (medicoRoleId != Guid.Empty)
             {
                 await db.Database.ExecuteSqlInterpolatedAsync(
-                    $@"UPDATE ""AspNetUsers""
-                       SET ""MedicoNumber"" = {number},
-                           ""FirstName"" = {first},
-                           ""LastName"" = {last},
-                           ""IsActive"" = true
-                       WHERE ""Badge"" = {badge}");
-            }
-        }
-        else
-        {
-            // DB completamente fresco (primo avvio): serve UserManager.
-            try
-            {
-                await SeedMediciAsync(db, userManager, tenant.Id, ct);
-            }
-            catch (Exception ex)
-            {
-                System.Console.Error.WriteLine(
-                    $"[DbSeeder] Medici seed warning (non-fatal): {ex.GetType().Name}: {ex.Message}");
-                // Pulizia CRITICA: ChangeTracker corrotto dopo eccezione DB
-                db.ChangeTracker.Clear();
+                    $@"INSERT INTO ""AspNetUserRoles"" (""UserId"", ""RoleId"")
+                       SELECT u.""Id"", {medicoRoleId}
+                       FROM ""AspNetUsers"" u
+                       WHERE u.""Badge"" = {badge}
+                       ON CONFLICT DO NOTHING");
             }
         }
 
         db.ChangeTracker.Clear();
         await SeedShiftsAsync(db, tenant.Id, ct);
-    }
-
-    private static async Task SeedMediciAsync(
-        ApplicationDbContext db,
-        UserManager<ApplicationUser> userManager,
-        Guid tenantId,
-        CancellationToken ct)
-    {
-        // Pulizia orfani: PRIMA rimuovi da AspNetUserRoles (FK), POI da AspNetUsers.
-        // Gli orfani sono utenti senza Badge creati da seed falliti precedenti.
-        await db.Database.ExecuteSqlRawAsync(
-            @"DELETE FROM ""AspNetUserRoles""
-              WHERE ""UserId"" IN (
-                  SELECT ""Id"" FROM ""AspNetUsers""
-                  WHERE ""NormalizedEmail"" IN ('MEDICO1@NAVELLI.LOCAL','MEDICO2@NAVELLI.LOCAL',
-                                               'MEDICO3@NAVELLI.LOCAL','MEDICO4@NAVELLI.LOCAL',
-                                               'SUPERBOY23+ALESSANDRO@GMAIL.COM','SUPERBOY23+EMANUELE@GMAIL.COM',
-                                               'SUPERBOY23+EDOARDO@GMAIL.COM','SUPERBOY23+CLAUDIA@GMAIL.COM')
-                    AND (""Badge"" IS NULL OR ""Badge"" = ''))");
-
-        await db.Database.ExecuteSqlRawAsync(
-            @"DELETE FROM ""AspNetUsers""
-              WHERE ""NormalizedEmail"" IN ('MEDICO1@NAVELLI.LOCAL','MEDICO2@NAVELLI.LOCAL',
-                                           'MEDICO3@NAVELLI.LOCAL','MEDICO4@NAVELLI.LOCAL',
-                                           'SUPERBOY23+ALESSANDRO@GMAIL.COM','SUPERBOY23+EMANUELE@GMAIL.COM',
-                                           'SUPERBOY23+EDOARDO@GMAIL.COM','SUPERBOY23+CLAUDIA@GMAIL.COM')
-                AND (""Badge"" IS NULL OR ""Badge"" = '')");
-
-        db.ChangeTracker.Clear();
-
-        // Crea solo utenti mancanti (DB fresco)
-        foreach (var (number, badge, email, password, first, last) in Medici)
-        {
-            var existsByBadge = await db.Users.IgnoreQueryFilters().AsNoTracking()
-                .AnyAsync(u => u.Badge == badge, ct);
-            if (existsByBadge) continue;
-
-            var existsByEmail = await db.Users.IgnoreQueryFilters().AsNoTracking()
-                .AnyAsync(u => u.NormalizedEmail == email.ToUpperInvariant(), ct);
-            if (existsByEmail) continue;
-
-            var user = new ApplicationUser
-            {
-                UserName = email,
-                Email = email,
-                EmailConfirmed = false,
-                IsDefaultEmail = true,
-                FirstName = first,
-                LastName = last,
-                Role = UserRole.Medico,
-                TenantId = tenantId,
-                MedicoNumber = null,
-                Badge = null,
-                IsActive = true,
-                CreatedAtUtc = DateTime.UtcNow,
-            };
-            var res = await userManager.CreateAsync(user, password);
-            if (!res.Succeeded)
-                throw new InvalidOperationException(
-                    $"Seed medico {email} failed: " +
-                    string.Join("; ", res.Errors.Select(e => e.Description)));
-            await userManager.AddToRoleAsync(user, RoleNames.Medico);
-
-            db.ChangeTracker.Clear();
-        }
-
-        db.ChangeTracker.Clear();
-
-        // Assegna Badge via SQL per utenti appena creati
-        foreach (var (number, badge, email, _, first, last) in Medici)
-        {
-            var normalizedEmail = email.ToUpperInvariant();
-            await db.Database.ExecuteSqlInterpolatedAsync(
-                $@"UPDATE ""AspNetUsers""
-                   SET ""Badge"" = {badge},
-                       ""MedicoNumber"" = {number},
-                       ""FirstName"" = {first},
-                       ""LastName"" = {last},
-                       ""IsActive"" = true
-                   WHERE ""NormalizedEmail"" = {normalizedEmail}
-                     AND (""Badge"" IS NULL OR ""Badge"" = '')");
-        }
     }
 
     private static async Task SeedShiftsAsync(
