@@ -94,12 +94,12 @@ public static class DbSeeder
             await db.SaveChangesAsync(ct);
         }
 
-        // SuperAdmin globale
-        db.ChangeTracker.Clear();
-        var admin = await userManager.FindByEmailAsync(AdminEmail);
-        if (admin is null)
+        // SuperAdmin globale — controlliamo via SQL per non sporcare il ChangeTracker
+        var adminExists = await db.Users.IgnoreQueryFilters().AsNoTracking()
+            .AnyAsync(u => u.NormalizedEmail == AdminEmail.ToUpperInvariant(), ct);
+        if (!adminExists)
         {
-            admin = new ApplicationUser
+            var admin = new ApplicationUser
             {
                 UserName = AdminEmail,
                 Email = AdminEmail,
@@ -116,6 +116,7 @@ public static class DbSeeder
                 throw new InvalidOperationException(
                     "Seed admin failed: " + string.Join("; ", res.Errors.Select(e => e.Description)));
             await userManager.AddToRoleAsync(admin, SuperAdminRole);
+            db.ChangeTracker.Clear();
         }
 
         // ── 4 Medici di Navelli ──────────────────────────────────────────

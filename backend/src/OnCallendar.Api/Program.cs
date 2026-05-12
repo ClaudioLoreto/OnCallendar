@@ -193,14 +193,24 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-// Migrate + Seed (dev: crea tenant L'Aquila, admin di default, 3 medici)
+// Migrate + Seed
 using (var scope = app.Services.CreateScope())
 {
     var sp = scope.ServiceProvider;
     var db = sp.GetRequiredService<ApplicationDbContext>();
     var um = sp.GetRequiredService<UserManager<ApplicationUser>>();
     var rm = sp.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
-    await DbSeeder.SeedAsync(db, um, rm);
+    try
+    {
+        await DbSeeder.SeedAsync(db, um, rm);
+    }
+    catch (Exception ex)
+    {
+        // Il seed NON deve MAI impedire l'avvio dell'app.
+        // In prod i dati esistono già; un errore di seed è solo un warning.
+        var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("DbSeeder");
+        logger.LogError(ex, "Seed failed (non-fatal). L'app continua comunque.");
+    }
 }
 
 if (app.Environment.IsDevelopment())
