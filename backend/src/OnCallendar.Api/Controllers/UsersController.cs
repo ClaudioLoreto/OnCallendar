@@ -275,6 +275,9 @@ public sealed class UsersController : ControllerBase
     [Authorize]
     public async Task<IActionResult> DevExpirePassword()
     {
+        if (!_env.IsDevelopment())
+            return NotFound();
+
         if (_user.UserId is not Guid uid) return Unauthorized();
         var u = await _users.FindByIdAsync(uid.ToString());
         if (u is null) return NotFound();

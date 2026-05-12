@@ -52,18 +52,26 @@ else
 }
 
 // -------------------------------------------------------------------------
-// CORS per app mobile in development. In Expo Go, durante il dev,
-// le richieste arrivano dall'IP del telefono e non hanno un Origin "browser",
-// ma se in futuro userai Expo Web o un dashboard admin web ti serve.
-// In dev usiamo policy permissiva; in prod stringeremo.
-// -------------------------------------------------------------------------
-const string DevCorsPolicy = "OnCallendar.Dev";
-builder.Services.AddCors(o => o.AddPolicy(DevCorsPolicy, p =>
+// CORS: permissivo in dev, restrittivo in prod.
+const string CorsPolicy = "OnCallendar.Cors";
+builder.Services.AddCors(o => o.AddPolicy(CorsPolicy, p =>
 {
-    p.SetIsOriginAllowed(_ => true)   // dev: qualsiasi origin (incluso null)
-     .AllowAnyHeader()
-     .AllowAnyMethod()
-     .AllowCredentials();
+    if (builder.Environment.IsDevelopment())
+    {
+        p.SetIsOriginAllowed(_ => true)
+         .AllowAnyHeader()
+         .AllowAnyMethod()
+         .AllowCredentials();
+    }
+    else
+    {
+        p.WithOrigins(
+                "https://api-production-e42a.up.railway.app",
+                "https://oncallendar.app")
+         .AllowAnyHeader()
+         .AllowAnyMethod()
+         .AllowCredentials();
+    }
 }));
 
 // Default = postgres (sia in dev via Docker che in prod su Railway).
@@ -114,6 +122,13 @@ builder.Services
 
 // JWT
 var jwtSettings = builder.Configuration.GetSection("Jwt").Get<JwtSettings>() ?? new JwtSettings();
+if (!builder.Environment.IsDevelopment()
+    && jwtSettings.SecretKey.Contains("dev-only", StringComparison.OrdinalIgnoreCase))
+{
+    throw new InvalidOperationException(
+        "FATAL: Jwt:SecretKey è ancora il valore di default. " +
+        "Imposta Jwt__SecretKey nelle variabili d'ambiente di produzione.");
+}
 builder.Services.AddSingleton(jwtSettings);
 builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
 
@@ -234,7 +249,7 @@ app.UseStaticFiles(new StaticFileOptions
     ServeUnknownFileTypes = true,
 });
 
-app.UseCors(DevCorsPolicy);
+app.UseCors(CorsPolicy);
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
