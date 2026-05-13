@@ -262,13 +262,41 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// ── Custom error page per 4xx/5xx (errore.png + messaggio) ──────────────
+// ── Custom error page per eccezioni non gestite (500) ───────────────────
+// Mostra errore.png + messaggio invece dello stacktrace o pagina bianca.
+app.UseExceptionHandler(err =>
+{
+    err.Run(async ctx =>
+    {
+        // API calls rispondono JSON, non HTML
+        var path = ctx.Request.Path.Value ?? string.Empty;
+        if (path.StartsWith("/api", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/health", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            ctx.Response.ContentType = "application/json";
+            await ctx.Response.WriteAsync("{\"error\":\"Errore interno del server\"}");
+            return;
+        }
+
+        ctx.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        var errorHtml = Path.Combine(app.Environment.WebRootPath, "error.html");
+        if (File.Exists(errorHtml))
+        {
+            var html = await File.ReadAllTextAsync(errorHtml);
+            html = html.Replace("{{STATUS_CODE}}", "500");
+            ctx.Response.ContentType = "text/html; charset=utf-8";
+            await ctx.Response.WriteAsync(html);
+        }
+    });
+});
+
+// Status code pages per 4xx (es. 404 su rotte non-SPA)
 app.UseStatusCodePages(async ctx =>
 {
     var response = ctx.HttpContext.Response;
     var statusCode = response.StatusCode;
 
-    // Non interferire con API calls — rispondono già JSON
     var path = ctx.HttpContext.Request.Path.Value ?? string.Empty;
     if (path.StartsWith("/api", StringComparison.OrdinalIgnoreCase) ||
         path.StartsWith("/health", StringComparison.OrdinalIgnoreCase))
@@ -306,6 +334,13 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", time = DateTime.UtcNow }));
+
+// Test endpoint per verificare la pagina di errore personalizzata.
+// Visita /test-error nel browser per simulare un crash del server.
+app.MapGet("/test-error", (HttpContext _) =>
+{
+    throw new InvalidOperationException("Test error — pagina di errore personalizzata");
+});
 
 // SPA fallback: per qualsiasi rotta del client (non /api, /swagger, /uploads, /health)
 // rimanda a index.html così il client routing funziona anche su refresh.
