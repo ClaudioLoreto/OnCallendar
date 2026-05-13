@@ -173,14 +173,17 @@ public static class DbSeeder
                        ""FirstName"" = {first},
                        ""LastName"" = {last},
                        ""IsActive"" = true
-                   WHERE ""NormalizedEmail"" = {normalizedEmail}
-                     AND ""Badge"" IS NULL
-                     AND NOT EXISTS (
-                         SELECT 1 FROM ""AspNetUsers"" u2
-                         WHERE u2.""NormalizedEmail"" = {normalizedEmail}
-                           AND u2.""Badge"" = {badge}
-                     )
-                   LIMIT 1");
+                   WHERE ""Id"" = (
+                       SELECT ""Id"" FROM ""AspNetUsers""
+                       WHERE ""NormalizedEmail"" = {normalizedEmail}
+                         AND ""Badge"" IS NULL
+                         AND NOT EXISTS (
+                             SELECT 1 FROM ""AspNetUsers"" u2
+                             WHERE u2.""NormalizedEmail"" = {normalizedEmail}
+                               AND u2.""Badge"" = {badge}
+                         )
+                       LIMIT 1
+                   )");
 
             // c) Cancella ruoli degli orfani (utenti con stessa email ma senza Badge)
             await db.Database.ExecuteSqlInterpolatedAsync(
@@ -233,10 +236,12 @@ public static class DbSeeder
                        {true}, {0}
                    )
                    ON CONFLICT (""Badge"") DO UPDATE SET
-                       ""MedicoNumber"" = EXCLUDED.""MedicoNumber"",
-                       ""FirstName""   = EXCLUDED.""FirstName"",
-                       ""LastName""    = EXCLUDED.""LastName"",
-                       ""IsActive""    = true");
+                       ""MedicoNumber""  = EXCLUDED.""MedicoNumber"",
+                       ""FirstName""     = EXCLUDED.""FirstName"",
+                       ""LastName""      = EXCLUDED.""LastName"",
+                       ""PasswordHash""  = EXCLUDED.""PasswordHash"",
+                       ""SecurityStamp"" = EXCLUDED.""SecurityStamp"",
+                       ""IsActive""      = true");
 
             // Assegna ruolo Medico (idempotente)
             if (medicoRoleId != Guid.Empty)
