@@ -133,6 +133,58 @@ public static class DbSeeder
         var hasher = new PasswordHasher<ApplicationUser>();
         var dummyUser = new ApplicationUser();
 
+        // ── STEP 0: Riconcilia utenti pre-esistenti (creati da seeder vecchio
+        //    senza Badge) assegnando Badge per email, così l'UPSERT successivo
+        //    fa UPDATE (stesso ID) anziché INSERT (nuovo ID duplicato).
+        //    Questo preserva i riferimenti dei turni già in DB.
+        foreach (var (number, badge, email, _, first, last) in Medici)
+        {
+            var normalizedEmail = email.ToUpperInvariant();
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $@"UPDATE ""AspNetUsers""
+                   SET ""Badge"" = {badge},
+                       ""MedicoNumber"" = {number},
+                       ""FirstName"" = {first},
+                       ""LastName"" = {last}
+                   WHERE ""NormalizedEmail"" = {normalizedEmail}
+                     AND (""Badge"" IS NULL OR ""Badge"" = '')");
+        }
+
+        // ── STEP 0b: Elimina eventuali duplicati creati dal vecchio seeder.
+        //    Se ci sono più utenti con la stessa email, teniamo quello
+        //    referenziato dai turni (ha FK da Shifts) e cancelliamo l'altro.
+        foreach (var (_, badge, email, _, _, _) in Medici)
+        {
+            var normalizedEmail = email.ToUpperInvariant();
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $@"DELETE FROM ""AspNetUserRoles""
+                   WHERE ""UserId"" IN (
+                       SELECT u.""Id"" FROM ""AspNetUsers"" u
+                       WHERE u.""NormalizedEmail"" = {normalizedEmail}
+                         AND u.""Id"" NOT IN (
+                             SELECT COALESCE(s.""MedicoTurnoId"", '00000000-0000-0000-0000-000000000000')
+                             FROM ""Shifts"" s WHERE s.""MedicoTurnoId"" IS NOT NULL
+                             UNION
+                             SELECT COALESCE(s.""MedicoReperibileId"", '00000000-0000-0000-0000-000000000000')
+                             FROM ""Shifts"" s WHERE s.""MedicoReperibileId"" IS NOT NULL
+                         )
+                         AND (SELECT count(*) FROM ""AspNetUsers"" u2
+                              WHERE u2.""NormalizedEmail"" = {normalizedEmail}) > 1
+                   )");
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $@"DELETE FROM ""AspNetUsers""
+                   WHERE ""NormalizedEmail"" = {normalizedEmail}
+                     AND ""Id"" NOT IN (
+                         SELECT COALESCE(s.""MedicoTurnoId"", '00000000-0000-0000-0000-000000000000')
+                         FROM ""Shifts"" s WHERE s.""MedicoTurnoId"" IS NOT NULL
+                         UNION
+                         SELECT COALESCE(s.""MedicoReperibileId"", '00000000-0000-0000-0000-000000000000')
+                         FROM ""Shifts"" s WHERE s.""MedicoReperibileId"" IS NOT NULL
+                     )
+                     AND (SELECT count(*) FROM ""AspNetUsers"" u2
+                          WHERE u2.""NormalizedEmail"" = {normalizedEmail}) > 1");
+        }
+
         foreach (var (number, badge, email, password, first, last) in Medici)
         {
             var passwordHash = hasher.HashPassword(dummyUser, password);
