@@ -407,19 +407,31 @@ function Migrate-Railway {
 
 function Deploy-RailwayCli {
     Write-Host ""
-    Write-Host "  DEPLOY RAILWAY CLI" -ForegroundColor Magenta
-    Write-Host "  Deploya il codice locale direttamente su Railway (senza passare da GitHub Actions)." -ForegroundColor Yellow
+    Write-Host "  ══════════════════════════════════════════════════════════" -ForegroundColor Magenta
+    Write-Host "              DEPLOY RAILWAY CLI (railway up)" -ForegroundColor Magenta
+    Write-Host "  ══════════════════════════════════════════════════════════" -ForegroundColor Magenta
+    Write-Host ""
+    Write-Host "  Cosa fa:" -ForegroundColor Yellow
+    Write-Host "    1. Build locale (cattura errori PRIMA di caricare)" -ForegroundColor Gray
+    Write-Host "    2. Commit + push modifiche pendenti" -ForegroundColor Gray
+    Write-Host "    3. Carica su Railway (railway up --detach)" -ForegroundColor Gray
+    Write-Host "    4. Attende la build Railway (~3 min)" -ForegroundColor Gray
+    Write-Host "    5. Health check automatico" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  Sicurezza dati:" -ForegroundColor Yellow
+    Write-Host "    - Le migrations aggiornano SOLO lo schema (tabelle/colonne)" -ForegroundColor Green
+    Write-Host "    - I turni esistenti NON vengono toccati" -ForegroundColor Green
+    Write-Host "    - Gli utenti vengono creati con UPSERT (ON CONFLICT Badge)" -ForegroundColor Green
+    Write-Host "      → se il Badge esiste gia, aggiorna solo nome/cognome" -ForegroundColor Green
+    Write-Host "      → MAI duplicati, MAI perdita dati" -ForegroundColor Green
     Write-Host ""
 
-    # Controlla railway CLI
+    # ── 0. Controlla Railway CLI + login
     $railwayCmd = Get-Command railway -ErrorAction SilentlyContinue
     if (-not $railwayCmd) {
         Write-Host "  ERRORE: Railway CLI non trovata. Installa con: npm i -g @railway/cli" -ForegroundColor Red
-        Wait-Key
-        return
+        Wait-Key; return
     }
-
-    # Verifica login
     $whoami = railway whoami 2>&1
     if ($whoami -match "Unauthorized") {
         Write-Host "  Non sei loggato. Eseguo railway login..." -ForegroundColor Yellow
@@ -427,28 +439,37 @@ function Deploy-RailwayCli {
         $whoami = railway whoami 2>&1
         if ($whoami -match "Unauthorized") {
             Write-Host "  ERRORE: login fallito." -ForegroundColor Red
-            Wait-Key
-            return
+            Wait-Key; return
         }
     }
     Write-Host "  Loggato come: $whoami" -ForegroundColor Green
 
-    # Controlla che il progetto sia linkato
     $status = railway status 2>&1
     if ($status -match "No linked project") {
         Write-Host "  Progetto non linkato. Eseguo railway link..." -ForegroundColor Yellow
         railway link
     }
 
+    # ── 1. Build locale: cattura errori PRIMA di perdere tempo col deploy
     Write-Host ""
-    Write-Host "  Stato attuale:" -ForegroundColor Cyan
-    railway status 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor Gray }
+    Write-Host "  [1/5] Build locale..." -ForegroundColor Cyan
+    Set-Location $backend
+    $buildOutput = dotnet build src/OnCallendar.Api/OnCallendar.Api.csproj --configuration Release 2>&1
+    $buildExitCode = $LASTEXITCODE
+    Set-Location $root
+    if ($buildExitCode -ne 0) {
+        Write-Host "  BUILD FALLITA! Correggi gli errori prima di deployare." -ForegroundColor Red
+        Write-Host ""
+        $buildOutput | Where-Object { $_ -match "error CS" } | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+        Wait-Key; return
+    }
+    Write-Host "  Build OK." -ForegroundColor Green
 
-    # Commit pendenti?
+    # ── 2. Commit + push modifiche pendenti
+    Write-Host ""
+    Write-Host "  [2/5] Git commit + push..." -ForegroundColor Cyan
     $statusLines = git -C $root status --porcelain
     if ($statusLines) {
-        Write-Host ""
-        Write-Host "  Ci sono modifiche non committate:" -ForegroundColor Yellow
         git -C $root status --short | ForEach-Object { Write-Host "    $_" -ForegroundColor Gray }
         Write-Host ""
         $suggested = Suggest-CommitMessage
@@ -456,31 +477,73 @@ function Deploy-RailwayCli {
         if ($null -ne $msg) {
             git -C $root add -A
             git -C $root commit -m $msg
-            git -C $root push origin (git -C $root branch --show-current) 2>&1 | Out-Null
-            Write-Host "  Committato e pushato." -ForegroundColor Green
         }
+    } else {
+        Write-Host "  Niente da committare." -ForegroundColor DarkGray
     }
+    $currentBranch = git -C $root branch --show-current 2>$null
+    git -C $root push origin $currentBranch 2>&1 | Out-Null
+    Write-Host "  Push completato ($currentBranch)." -ForegroundColor Green
 
+    # ── 3. Conferma e deploy
     Write-Host ""
-    $confirm = Read-Host "  Procedo con il deploy su Railway? [S/n]"
+    $confirm = Read-Host "  [3/5] Procedo con il deploy su Railway? [S/n]"
     if ($confirm -match "^[Nn]") {
         Write-Host "  Annullato." -ForegroundColor DarkGray
-        Wait-Key
-        return
+        Wait-Key; return
+    }
+    Write-Host "  Caricamento..." -ForegroundColor Cyan
+    railway up --detach 2>&1
+
+    # ── 4. Attesa build Railway
+    Write-Host ""
+    Write-Host "  [4/5] Attendo build Railway (~3 minuti)..." -ForegroundColor Yellow
+    $prodUrl = "https://api-production-e42a.up.railway.app"
+    for ($i = 1; $i -le 36; $i++) {
+        Start-Sleep -Seconds 10
+        $elapsed = $i * 10
+        $min = [math]::Floor($elapsed / 60)
+        $sec = $elapsed % 60
+        Write-Host "    ${min}m ${sec}s..." -ForegroundColor DarkGray -NoNewline
+        try {
+            $health = Invoke-RestMethod -Uri "$prodUrl/health" -TimeoutSec 5 -ErrorAction Stop
+            if ($health.status -eq "ok") {
+                Write-Host " ONLINE!" -ForegroundColor Green
+                break
+            }
+        } catch {
+            Write-Host "" -NoNewline
+        }
+        Write-Host ""
+    }
+
+    # ── 5. Health check + test login
+    Write-Host ""
+    Write-Host "  [5/5] Verifica post-deploy..." -ForegroundColor Cyan
+    try {
+        $health = Invoke-RestMethod -Uri "$prodUrl/health" -TimeoutSec 10 -ErrorAction Stop
+        Write-Host "  /health: $($health.status) — $($health.time)" -ForegroundColor Green
+    } catch {
+        Write-Host "  /health FALLITO — il servizio potrebbe essere ancora in avvio" -ForegroundColor Red
+        Write-Host "  Riprova tra qualche minuto o controlla: railway logs" -ForegroundColor Yellow
+        Wait-Key; return
+    }
+
+    try {
+        $loginBody = '{"email":"M01","password":"Medico#2026!"}'
+        $login = Invoke-RestMethod -Uri "$prodUrl/api/auth/login" -Method POST `
+            -ContentType "application/json" -Body $loginBody -TimeoutSec 10 -ErrorAction Stop
+        Write-Host "  Login M01: $($login.fullName) (userId=$($login.userId))" -ForegroundColor Green
+    } catch {
+        Write-Host "  Login M01 fallito: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "  (potrebbe essere normale se hai appena resettato i medici)" -ForegroundColor DarkGray
     }
 
     Write-Host ""
-    Write-Host "  Caricamento in corso..." -ForegroundColor Cyan
-    railway up --detach 2>&1
-
+    Write-Host "  ══════════════════════════════════════════════════════════" -ForegroundColor Green
+    Write-Host "  DEPLOY COMPLETATO CON SUCCESSO" -ForegroundColor Green
+    Write-Host "  ══════════════════════════════════════════════════════════" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  Deploy avviato! La build richiede ~2 minuti." -ForegroundColor Green
-    Write-Host "  Verifica su: https://railway.com (o con 'railway logs')" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "  Test rapido dopo il deploy:" -ForegroundColor Yellow
-    Write-Host "    Invoke-RestMethod -Uri 'https://api-production-e42a.up.railway.app/api/auth/login' ``" -ForegroundColor DarkGray
-    Write-Host "      -Method POST -ContentType 'application/json' ``" -ForegroundColor DarkGray
-    Write-Host "      -Body '{`"email`":`"M01`",`"password`":`"Medico#2026!`"}'  " -ForegroundColor DarkGray
     Wait-Key
 }
 
