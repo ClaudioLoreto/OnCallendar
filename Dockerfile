@@ -33,6 +33,12 @@ WORKDIR /app
 COPY --from=build /app/publish ./
 # Web SPA copiata direttamente in wwwroot (servita da UseStaticFiles)
 COPY --from=web /work/web/dist ./wwwroot/
+# I file statici del backend (favicon, error page, ecc.) vengono copiati
+# DOPO l'export Expo, così non vengono sovrascritti.
+COPY --from=build /app/publish/wwwroot/favicon.png ./wwwroot/
+COPY --from=build /app/publish/wwwroot/favicon.ico ./wwwroot/
+COPY --from=build /app/publish/wwwroot/error.html  ./wwwroot/
+COPY --from=build /app/publish/wwwroot/errore.png  ./wwwroot/
 
 # Railway inietta $PORT (di solito 8080); l'app legge env e usa quella
 ENV ASPNETCORE_URLS=http://0.0.0.0:8080
