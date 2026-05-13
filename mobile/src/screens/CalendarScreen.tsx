@@ -25,7 +25,7 @@ export default function CalendarScreen({ navigation }: Props) {
 
   // Filtri retraibili
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [showOnlyMine, setShowOnlyMine] = useState(true);
+  const [showOnlyMine, setShowOnlyMine] = useState(false);
   const [rangeDays, setRangeDays] = useState(14);
 
   // Sheet azioni sul mio turno
