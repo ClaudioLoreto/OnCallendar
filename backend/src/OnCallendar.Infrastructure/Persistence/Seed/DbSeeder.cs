@@ -133,62 +133,21 @@ public static class DbSeeder
         var hasher = new PasswordHasher<ApplicationUser>();
         var dummyUser = new ApplicationUser();
 
-        // ── STEP 0: Riconcilia utenti duplicati.
-        //    Il vecchio seeder (UserManager) creava utenti SENZA Badge.
-        //    L'UPSERT (ON CONFLICT Badge) ha poi inserito NUOVI utenti CON Badge,
-        //    perché il vecchio utente non aveva Badge → nessun conflict.
-        //    Risultato: per ogni medico ci sono DUE user:
-        //      - "vecchio" (MedicoNumber=N, Badge=NULL) → referenziato dagli shift FK
-        //      - "nuovo"   (MedicoNumber=N, Badge='M0N') → trovato dal login
-        //    Fix: sposta i FK degli shift sul nuovo (Badge), poi elimina il vecchio.
-        foreach (var (number, badge, email, _, first, last) in Medici)
+        // ── STEP 0: NUKE & REBUILD (una tantum, attivato da env var).
+        //    Elimina TUTTI i medici, turni e swap, poi li ricrea da zero.
+        //    Imposta ONCALLENDAR_NUKE_MEDICI=true in Railway, poi rimuovila dopo il boot.
+        var nukeMedici = Environment.GetEnvironmentVariable("ONCALLENDAR_NUKE_MEDICI") == "true";
+        if (nukeMedici)
         {
-            // a) Sposta MedicoTurnoId dagli orfani al keeper (utente con Badge)
             await db.Database.ExecuteSqlInterpolatedAsync(
-                $@"UPDATE ""Shifts"" s
-                   SET ""MedicoTurnoId"" = k.""Id""
-                   FROM ""AspNetUsers"" k
-                   WHERE k.""Badge"" = {badge}
-                     AND s.""MedicoTurnoId"" IN (
-                         SELECT o.""Id"" FROM ""AspNetUsers"" o
-                         WHERE o.""MedicoNumber"" = {number}
-                           AND o.""Id"" != k.""Id""
-                     )");
-
-            // b) Sposta MedicoReperibileId
+                $@"DELETE FROM ""SwapRequests"" WHERE ""TenantId"" = {tenant.Id}");
             await db.Database.ExecuteSqlInterpolatedAsync(
-                $@"UPDATE ""Shifts"" s
-                   SET ""MedicoReperibileId"" = k.""Id""
-                   FROM ""AspNetUsers"" k
-                   WHERE k.""Badge"" = {badge}
-                     AND s.""MedicoReperibileId"" IN (
-                         SELECT o.""Id"" FROM ""AspNetUsers"" o
-                         WHERE o.""MedicoNumber"" = {number}
-                           AND o.""Id"" != k.""Id""
-                     )");
-
-            // c) Cancella ruoli degli orfani
-            await db.Database.ExecuteSqlInterpolatedAsync(
-                $@"DELETE FROM ""AspNetUserRoles""
-                   WHERE ""UserId"" IN (
-                       SELECT o.""Id"" FROM ""AspNetUsers"" o
-                       WHERE o.""MedicoNumber"" = {number}
-                         AND EXISTS (
-                             SELECT 1 FROM ""AspNetUsers"" k
-                             WHERE k.""Badge"" = {badge}
-                               AND k.""Id"" != o.""Id""
-                         )
-                   )");
-
-            // d) Cancella gli orfani (utenti con stesso MedicoNumber ma senza Badge)
-            await db.Database.ExecuteSqlInterpolatedAsync(
-                $@"DELETE FROM ""AspNetUsers""
-                   WHERE ""MedicoNumber"" = {number}
-                     AND (""Badge"" IS NULL OR ""Badge"" != {badge})
-                     AND EXISTS (
-                         SELECT 1 FROM ""AspNetUsers"" k
-                         WHERE k.""Badge"" = {badge}
-                     )");
+                $@"DELETE FROM ""Shifts"" WHERE ""TenantId"" = {tenant.Id}");
+            await db.Database.ExecuteSqlRawAsync(
+                @"DELETE FROM ""AspNetUserRoles"" WHERE ""UserId"" IN (
+                    SELECT ""Id"" FROM ""AspNetUsers"" WHERE ""Role"" = 'Medico')");
+            await db.Database.ExecuteSqlRawAsync(
+                @"DELETE FROM ""AspNetUsers"" WHERE ""Role"" = 'Medico'");
         }
 
         foreach (var (number, badge, email, password, first, last) in Medici)

@@ -262,6 +262,28 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// ── Custom error page per 4xx/5xx (errore.png + messaggio) ──────────────
+app.UseStatusCodePages(async ctx =>
+{
+    var response = ctx.HttpContext.Response;
+    var statusCode = response.StatusCode;
+
+    // Non interferire con API calls — rispondono già JSON
+    var path = ctx.HttpContext.Request.Path.Value ?? string.Empty;
+    if (path.StartsWith("/api", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/health", StringComparison.OrdinalIgnoreCase))
+        return;
+
+    var errorHtml = Path.Combine(app.Environment.WebRootPath, "error.html");
+    if (!File.Exists(errorHtml)) return;
+
+    var html = await File.ReadAllTextAsync(errorHtml);
+    html = html.Replace("{{STATUS_CODE}}", statusCode.ToString());
+
+    response.ContentType = "text/html; charset=utf-8";
+    await response.WriteAsync(html);
+});
+
 // Static files per avatar caricati dagli utenti + SPA Web (Expo export → wwwroot/)
 var wwwroot = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
 Directory.CreateDirectory(Path.Combine(wwwroot, "uploads", "avatars"));
