@@ -133,56 +133,69 @@ public static class DbSeeder
         var hasher = new PasswordHasher<ApplicationUser>();
         var dummyUser = new ApplicationUser();
 
-        // ── STEP 0: Riconcilia utenti pre-esistenti (creati da seeder vecchio
-        //    senza Badge) assegnando Badge per email, così l'UPSERT successivo
-        //    fa UPDATE (stesso ID) anziché INSERT (nuovo ID duplicato).
-        //    Questo preserva i riferimenti dei turni già in DB.
+        // ── STEP 0: Riconcilia utenti duplicati (creati da seeder vecchio senza Badge
+        //    + UPSERT che ha inserito duplicati con Badge). I turni puntano agli utenti
+        //    VECCHI (senza Badge), il login trova quelli NUOVI (con Badge).
+        //    Soluzione: per ogni medico:
+        //      a) NULL Badge su TUTTI gli utenti con quella email (libera unique constraint)
+        //      b) Assegna Badge all'utente referenziato dai turni (il "keeper")
+        //      c) Cancella gli orfani (ruoli prima, poi utente)
         foreach (var (number, badge, email, _, first, last) in Medici)
         {
             var normalizedEmail = email.ToUpperInvariant();
+
+            // a) Libera il Badge da tutti gli utenti con questa email
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $@"UPDATE ""AspNetUsers""
+                   SET ""Badge"" = NULL
+                   WHERE ""NormalizedEmail"" = {normalizedEmail}");
+
+            // b) Assegna Badge all'utente referenziato dai turni (se esiste)
             await db.Database.ExecuteSqlInterpolatedAsync(
                 $@"UPDATE ""AspNetUsers""
                    SET ""Badge"" = {badge},
                        ""MedicoNumber"" = {number},
                        ""FirstName"" = {first},
-                       ""LastName"" = {last}
+                       ""LastName"" = {last},
+                       ""IsActive"" = true
                    WHERE ""NormalizedEmail"" = {normalizedEmail}
-                     AND (""Badge"" IS NULL OR ""Badge"" = '')");
-        }
+                     AND ""Id"" IN (
+                         SELECT ""MedicoTurnoId"" FROM ""Shifts"" WHERE ""MedicoTurnoId"" IS NOT NULL
+                         UNION
+                         SELECT ""MedicoReperibileId"" FROM ""Shifts"" WHERE ""MedicoReperibileId"" IS NOT NULL
+                     )");
 
-        // ── STEP 0b: Elimina eventuali duplicati creati dal vecchio seeder.
-        //    Se ci sono più utenti con la stessa email, teniamo quello
-        //    referenziato dai turni (ha FK da Shifts) e cancelliamo l'altro.
-        foreach (var (_, badge, email, _, _, _) in Medici)
-        {
-            var normalizedEmail = email.ToUpperInvariant();
+            // Se nessun utente era referenziato dai turni, assegna Badge al primo trovato
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $@"UPDATE ""AspNetUsers""
+                   SET ""Badge"" = {badge},
+                       ""MedicoNumber"" = {number},
+                       ""FirstName"" = {first},
+                       ""LastName"" = {last},
+                       ""IsActive"" = true
+                   WHERE ""NormalizedEmail"" = {normalizedEmail}
+                     AND ""Badge"" IS NULL
+                     AND NOT EXISTS (
+                         SELECT 1 FROM ""AspNetUsers"" u2
+                         WHERE u2.""NormalizedEmail"" = {normalizedEmail}
+                           AND u2.""Badge"" = {badge}
+                     )
+                   LIMIT 1");
+
+            // c) Cancella ruoli degli orfani (utenti con stessa email ma senza Badge)
             await db.Database.ExecuteSqlInterpolatedAsync(
                 $@"DELETE FROM ""AspNetUserRoles""
                    WHERE ""UserId"" IN (
-                       SELECT u.""Id"" FROM ""AspNetUsers"" u
-                       WHERE u.""NormalizedEmail"" = {normalizedEmail}
-                         AND u.""Id"" NOT IN (
-                             SELECT COALESCE(s.""MedicoTurnoId"", '00000000-0000-0000-0000-000000000000')
-                             FROM ""Shifts"" s WHERE s.""MedicoTurnoId"" IS NOT NULL
-                             UNION
-                             SELECT COALESCE(s.""MedicoReperibileId"", '00000000-0000-0000-0000-000000000000')
-                             FROM ""Shifts"" s WHERE s.""MedicoReperibileId"" IS NOT NULL
-                         )
-                         AND (SELECT count(*) FROM ""AspNetUsers"" u2
-                              WHERE u2.""NormalizedEmail"" = {normalizedEmail}) > 1
+                       SELECT ""Id"" FROM ""AspNetUsers""
+                       WHERE ""NormalizedEmail"" = {normalizedEmail}
+                         AND (""Badge"" IS NULL OR ""Badge"" = '')
                    )");
+
+            // d) Cancella gli orfani
             await db.Database.ExecuteSqlInterpolatedAsync(
                 $@"DELETE FROM ""AspNetUsers""
                    WHERE ""NormalizedEmail"" = {normalizedEmail}
-                     AND ""Id"" NOT IN (
-                         SELECT COALESCE(s.""MedicoTurnoId"", '00000000-0000-0000-0000-000000000000')
-                         FROM ""Shifts"" s WHERE s.""MedicoTurnoId"" IS NOT NULL
-                         UNION
-                         SELECT COALESCE(s.""MedicoReperibileId"", '00000000-0000-0000-0000-000000000000')
-                         FROM ""Shifts"" s WHERE s.""MedicoReperibileId"" IS NOT NULL
-                     )
-                     AND (SELECT count(*) FROM ""AspNetUsers"" u2
-                          WHERE u2.""NormalizedEmail"" = {normalizedEmail}) > 1");
+                     AND (""Badge"" IS NULL OR ""Badge"" = '')");
         }
 
         foreach (var (number, badge, email, password, first, last) in Medici)
