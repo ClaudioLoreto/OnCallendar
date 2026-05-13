@@ -27,8 +27,9 @@ function Show-Menu {
     Write-Host ""
     Write-Host "  GIT / DEPLOY" -ForegroundColor Yellow
     Write-Host "   6  Git commit + push" -ForegroundColor White
-    Write-Host "   7  Deploy Railway (push su main)" -ForegroundColor White
-    Write-Host "   8  Migra DB produzione Railway" -ForegroundColor White
+    Write-Host "   7  Deploy Railway (merge su main + push)" -ForegroundColor White
+    Write-Host "   8  Migra DB produzione Railway (solo schema)" -ForegroundColor White
+    Write-Host "   9  Deploy Railway CLI (railway up)" -ForegroundColor White
     Write-Host ""
     Write-Host "   0  Esci" -ForegroundColor DarkGray
     Write-Host ""
@@ -332,7 +333,12 @@ function Deploy-Railway {
 function Migrate-Railway {
     Write-Host ""
     Write-Host "  MIGRAZIONE DB PRODUZIONE RAILWAY" -ForegroundColor Red
-    Write-Host "  ATTENZIONE: tocca il DB di produzione!" -ForegroundColor Yellow
+    Write-Host "  ──────────────────────────────────────────────────────────" -ForegroundColor DarkGray
+    Write-Host "  Le migrations EF aggiornano SOLO la STRUTTURA (schema):" -ForegroundColor Yellow
+    Write-Host "    - Aggiunge colonne, tabelle, indici nuovi" -ForegroundColor Gray
+    Write-Host "    - NON cancella ne' modifica le righe esistenti" -ForegroundColor Gray
+    Write-Host "    - I dati di produzione restano intatti al 100%" -ForegroundColor Green
+    Write-Host "  ──────────────────────────────────────────────────────────" -ForegroundColor DarkGray
     Write-Host ""
     $railwayUrl = Read-Host "  Incolla la DATABASE_URL di Railway"
     if ([string]::IsNullOrWhiteSpace($railwayUrl)) {
@@ -399,6 +405,85 @@ function Migrate-Railway {
     Wait-Key
 }
 
+function Deploy-RailwayCli {
+    Write-Host ""
+    Write-Host "  DEPLOY RAILWAY CLI" -ForegroundColor Magenta
+    Write-Host "  Deploya il codice locale direttamente su Railway (senza passare da GitHub Actions)." -ForegroundColor Yellow
+    Write-Host ""
+
+    # Controlla railway CLI
+    $railwayCmd = Get-Command railway -ErrorAction SilentlyContinue
+    if (-not $railwayCmd) {
+        Write-Host "  ERRORE: Railway CLI non trovata. Installa con: npm i -g @railway/cli" -ForegroundColor Red
+        Wait-Key
+        return
+    }
+
+    # Verifica login
+    $whoami = railway whoami 2>&1
+    if ($whoami -match "Unauthorized") {
+        Write-Host "  Non sei loggato. Eseguo railway login..." -ForegroundColor Yellow
+        railway login
+        $whoami = railway whoami 2>&1
+        if ($whoami -match "Unauthorized") {
+            Write-Host "  ERRORE: login fallito." -ForegroundColor Red
+            Wait-Key
+            return
+        }
+    }
+    Write-Host "  Loggato come: $whoami" -ForegroundColor Green
+
+    # Controlla che il progetto sia linkato
+    $status = railway status 2>&1
+    if ($status -match "No linked project") {
+        Write-Host "  Progetto non linkato. Eseguo railway link..." -ForegroundColor Yellow
+        railway link
+    }
+
+    Write-Host ""
+    Write-Host "  Stato attuale:" -ForegroundColor Cyan
+    railway status 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor Gray }
+
+    # Commit pendenti?
+    $statusLines = git -C $root status --porcelain
+    if ($statusLines) {
+        Write-Host ""
+        Write-Host "  Ci sono modifiche non committate:" -ForegroundColor Yellow
+        git -C $root status --short | ForEach-Object { Write-Host "    $_" -ForegroundColor Gray }
+        Write-Host ""
+        $suggested = Suggest-CommitMessage
+        $msg = Read-CommitMessage $suggested
+        if ($null -ne $msg) {
+            git -C $root add -A
+            git -C $root commit -m $msg
+            git -C $root push origin (git -C $root branch --show-current) 2>&1 | Out-Null
+            Write-Host "  Committato e pushato." -ForegroundColor Green
+        }
+    }
+
+    Write-Host ""
+    $confirm = Read-Host "  Procedo con il deploy su Railway? [S/n]"
+    if ($confirm -match "^[Nn]") {
+        Write-Host "  Annullato." -ForegroundColor DarkGray
+        Wait-Key
+        return
+    }
+
+    Write-Host ""
+    Write-Host "  Caricamento in corso..." -ForegroundColor Cyan
+    railway up --detach 2>&1
+
+    Write-Host ""
+    Write-Host "  Deploy avviato! La build richiede ~2 minuti." -ForegroundColor Green
+    Write-Host "  Verifica su: https://railway.com (o con 'railway logs')" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  Test rapido dopo il deploy:" -ForegroundColor Yellow
+    Write-Host "    Invoke-RestMethod -Uri 'https://api-production-e42a.up.railway.app/api/auth/login' ``" -ForegroundColor DarkGray
+    Write-Host "      -Method POST -ContentType 'application/json' ``" -ForegroundColor DarkGray
+    Write-Host "      -Body '{`"email`":`"M01`",`"password`":`"Medico#2026!`"}'  " -ForegroundColor DarkGray
+    Wait-Key
+}
+
 # MAIN LOOP
 while ($true) {
     Show-Menu
@@ -412,6 +497,7 @@ while ($true) {
         "6" { Git-Push }
         "7" { Deploy-Railway }
         "8" { Migrate-Railway }
+        "9" { Deploy-RailwayCli }
         "0" { Write-Host "  Ciao!" -ForegroundColor Cyan; exit 0 }
         default {
             Write-Host "  Scelta non valida." -ForegroundColor Red
