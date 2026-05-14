@@ -98,6 +98,11 @@ public class ShiftConfiguration : IEntityTypeConfiguration<Shift>
             .HasForeignKey(x => x.ExternalDoctorId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        b.HasOne(x => x.ExternalDoctorReperibile)
+            .WithMany()
+            .HasForeignKey(x => x.ExternalDoctorReperibileId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         b.HasIndex(x => new { x.TenantId, x.Date });
         b.HasIndex(x => new { x.TenantId, x.StartUtc });
         b.HasIndex(x => new { x.TenantId, x.MedicoTurnoId });

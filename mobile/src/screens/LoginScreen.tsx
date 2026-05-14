@@ -130,10 +130,6 @@ const LoginScreen: React.FC = () => {
           <View style={{ height: theme.spacing.s }} />
           <Button title={t('login.forgot')} variant="ghost" icon="key-outline" onPress={() => setForgotOpen(true)} />
         </Card>
-
-        <Text style={[theme.typography.caption, { textAlign: 'center', marginTop: theme.spacing.m }]}>
-          {t('login.noRegister')}
-        </Text>
       </ScrollView>
 
       <Sheet visible={forgotOpen} onClose={() => setForgotOpen(false)} title={t('login.forgot')}>

@@ -34,6 +34,9 @@ public class SwapRequest : BaseEntity, ITenantScoped, ISoftDeletable
 
     public string? Message { get; set; }
 
+    /// <summary>True se la richiesta riguarda il ruolo di reperibilità (non il turno).</summary>
+    public bool IsReperibile { get; set; }
+
     public DateTime? ResolvedAtUtc { get; set; }
     /// <summary>Motivo blocco / rigetto (es. messaggio dal Rule Engine).</summary>
     public string? ResolutionReason { get; set; }

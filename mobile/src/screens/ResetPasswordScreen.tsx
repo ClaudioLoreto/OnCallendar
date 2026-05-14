@@ -94,6 +94,11 @@ export default function ResetPasswordScreen({ email, token, onDone }: Props) {
           <PasswordField label="Nuova password" value={pwd} onChangeText={setPwd} />
           <PasswordRules value={pwd} />
           <PasswordField label="Conferma nuova password" value={pwd2} onChangeText={setPwd2} />
+          {pwd2.length > 0 && pwd !== pwd2 ? (
+            <Text style={{ color: theme.colors.danger, marginBottom: theme.spacing.s }}>
+              Le due password non coincidono.
+            </Text>
+          ) : null}
           <View style={{ height: theme.spacing.s }} />
           <Button title="Conferma" icon="checkmark-circle-outline" onPress={submit} loading={loading} disabled={!strong || !match} />
           <View style={{ height: theme.spacing.s }} />

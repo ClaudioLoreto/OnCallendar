@@ -12,12 +12,13 @@ public sealed record SwapDto(
     Guid? CounterpartId, string? CounterpartName, ShiftBriefDto? CounterpartShift,
     string? Message, string? ResolutionReason,
     DateTime CreatedAtUtc, DateTime? ResolvedAtUtc,
-    int PendingCounterOffersCount);
+    int PendingCounterOffersCount,
+    bool IsReperibile = false);
 
-public sealed record CreateGiveawayRequest(Guid ShiftId, Guid ToMedicoId, string? Message = null);
-public sealed record CreateSwapRequest(Guid MyShiftId, Guid OtherShiftId, string? Message = null);
-public sealed record CreateMultiGiveawayRequest(Guid ShiftId, List<Guid> RecipientIds, string? Message = null);
-public sealed record CreateMultiSwapRequest(Guid MyShiftId, List<Guid> CandidateShiftIds, string? Message = null);
+public sealed record CreateGiveawayRequest(Guid ShiftId, Guid ToMedicoId, string? Message = null, bool IsReperibile = false);
+public sealed record CreateSwapRequest(Guid MyShiftId, Guid OtherShiftId, string? Message = null, bool IsReperibile = false);
+public sealed record CreateMultiGiveawayRequest(Guid ShiftId, List<Guid> RecipientIds, string? Message = null, bool IsReperibile = false);
+public sealed record CreateMultiSwapRequest(Guid MyShiftId, List<Guid> CandidateShiftIds, string? Message = null, bool IsReperibile = false);
 public sealed record RejectBody(string? Reason = null);
 public sealed record CreateCounterOfferRequest(Guid OfferedShiftId, string? Message = null);
 

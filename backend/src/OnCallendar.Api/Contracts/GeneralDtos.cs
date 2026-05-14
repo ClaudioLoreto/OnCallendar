@@ -26,7 +26,7 @@ public sealed record RequestEmailChangeRequest(string NewEmail, string? ClientCa
 
 // ── Shifts ──
 public sealed record AssignExternalRequest(
-    string FirstName, string LastName, string? Phone = null, string? Email = null);
+    string FirstName, string LastName, string? Phone = null, string? Email = null, bool IsReperibile = false);
 
 // ── Notifications ──
 public sealed record NotificationDto(

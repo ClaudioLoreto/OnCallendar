@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator, KeyboardAvoidingView, Platform, SafeAreaView, ScrollView, Text, TouchableOpacity, View,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import {
   Avatar, Badge, Button, Card, ConfirmModal, Field, Icon, PasswordField, ReadValue, SegmentedControl,
@@ -46,6 +47,7 @@ export default function ProfileScreen({ navigation }: Props) {
   const [newPwd, setNewPwd] = useState('');
   const [newPwd2, setNewPwd2] = useState('');
   const [pwdOpen, setPwdOpen] = useState(false);
+  const [pwdError, setPwdError] = useState<string | null>(null);
 
   const [popup, setPopup] = useState<Popup | null>(null);
 
@@ -76,7 +78,7 @@ export default function ProfileScreen({ navigation }: Props) {
     }
   };
 
-  useEffect(() => { loadMe(); }, []);
+  useFocusEffect(useCallback(() => { loadMe(); }, []));
 
   const startEdit = () => {
     setError(null);
@@ -91,6 +93,7 @@ export default function ProfileScreen({ navigation }: Props) {
     setPhone(me.phone ?? '');
     setCurPwd(''); setNewPwd(''); setNewPwd2('');
     setPwdOpen(false);
+    setPwdError(null);
     setEditing(false);
     setError(null);
   };
@@ -104,7 +107,7 @@ export default function ProfileScreen({ navigation }: Props) {
       if (newPwd !== newPwd2) { setPopup({ title: 'Le password non coincidono', tone: 'warning', icon: 'alert-circle-outline' }); return; }
     }
 
-    setSaving(true); setError(null);
+    setSaving(true); setError(null); setPwdError(null);
     try {
       const emailChanged = !!me && email.trim().toLowerCase() !== me.email.toLowerCase();
       const updated = await UsersApi.updateMe({ firstName, lastName, phone });
@@ -115,12 +118,13 @@ export default function ProfileScreen({ navigation }: Props) {
         try {
           await UsersApi.changePassword(curPwd, newPwd);
           setCurPwd(''); setNewPwd(''); setNewPwd2('');
+          setPwdError(null);
           // ricarica me per refresh dei flag passwordChangedAtUtc / passwordChangeRequired / passwordExpired
           await loadMe();
           setPopup({ title: 'Password aggiornata', message: 'La tua nuova password è ora attiva.', tone: 'success', icon: 'shield-checkmark-outline' });
         } catch (e: any) {
           const msg = e?.response?.data?.errors?.join(' ') ?? e?.response?.data?.error ?? 'Cambio password non riuscito.';
-          setPopup({ title: 'Cambio password fallito', message: msg, tone: 'danger', icon: 'alert-circle-outline' });
+          setPwdError(msg);
           setSaving(false);
           return;
         }
@@ -307,7 +311,12 @@ export default function ProfileScreen({ navigation }: Props) {
                     <Text style={[theme.typography.caption, { marginBottom: theme.spacing.s }]}>
                       Inserisci la password attuale e la nuova password.
                     </Text>
-                    <PasswordField label="Password attuale" value={curPwd} onChangeText={setCurPwd} />
+                    <PasswordField label="Password attuale" value={curPwd} onChangeText={(v: string) => { setCurPwd(v); setPwdError(null); }} />
+                    {pwdError ? (
+                      <Text style={{ color: theme.colors.danger, marginTop: -theme.spacing.s, marginBottom: theme.spacing.s }}>
+                        {pwdError}
+                      </Text>
+                    ) : null}
                     <PasswordField label="Nuova password" value={newPwd} onChangeText={setNewPwd} />
                     {newPwd.length > 0 ? <PasswordRules value={newPwd} /> : null}
                     {newPwd.length > 0 && curPwd.length > 0 && newPwd === curPwd ? (
@@ -316,6 +325,11 @@ export default function ProfileScreen({ navigation }: Props) {
                       </Text>
                     ) : null}
                     <PasswordField label="Conferma nuova password" value={newPwd2} onChangeText={setNewPwd2} />
+                    {newPwd2.length > 0 && newPwd !== newPwd2 ? (
+                      <Text style={{ color: theme.colors.danger, marginTop: -theme.spacing.s, marginBottom: theme.spacing.s }}>
+                        Le due password non coincidono.
+                      </Text>
+                    ) : null}
                   </View>
                 ) : null}
               </View>
@@ -385,7 +399,7 @@ export default function ProfileScreen({ navigation }: Props) {
           <Text style={[theme.typography.caption, { marginBottom: theme.spacing.m }]}>
             Vedi tutti i turni passati e le richieste di scambio.
           </Text>
-          <Button title="Apri storico" variant="secondary" icon="time-outline"
+          <Button title="Apri storico" icon="time-outline"
             onPress={() => navigation.navigate('History')}
           />
         </Card>
@@ -396,7 +410,7 @@ export default function ProfileScreen({ navigation }: Props) {
           <Text style={[theme.typography.caption, { marginBottom: theme.spacing.m }]}>
             {t('notifPrefs.intro')}
           </Text>
-          <Button title={t('notifPrefs.open')} variant="secondary" icon="notifications-outline"
+          <Button title={t('notifPrefs.open')} icon="notifications-outline"
             onPress={() => navigation.navigate('NotificationPreferences')} />
         </Card>
 

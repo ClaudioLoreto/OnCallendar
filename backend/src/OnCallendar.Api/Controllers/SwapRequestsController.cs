@@ -35,7 +35,8 @@ public sealed class SwapRequestsController : ControllerBase
         r.CounterpartMedico is null ? null : $"{r.CounterpartMedico.FirstName} {r.CounterpartMedico.LastName}",
         r.CounterpartShift is null ? null : Brief(r.CounterpartShift),
         r.Message, r.ResolutionReason, r.CreatedAtUtc, r.ResolvedAtUtc,
-        r.CounterOffers?.Count(o => o.Status == CounterOfferStatus.Pending) ?? 0);
+        r.CounterOffers?.Count(o => o.Status == CounterOfferStatus.Pending) ?? 0,
+        r.IsReperibile);
 
     private static CounterOfferDto MapOffer(SwapCounterOffer o) => new(
         o.Id, o.SwapRequestId,
@@ -114,28 +115,28 @@ public sealed class SwapRequestsController : ControllerBase
     public async Task<ActionResult<SwapDto>> CreateGiveaway([FromBody] CreateGiveawayRequest req)
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
-        return FromResult(await _swaps.CreateGiveawayAsync(uid, req.ShiftId, req.ToMedicoId, req.Message), Map);
+        return FromResult(await _swaps.CreateGiveawayAsync(uid, req.ShiftId, req.ToMedicoId, req.Message, req.IsReperibile), Map);
     }
 
     [HttpPost("giveaway-multi")]
     public async Task<ActionResult<IEnumerable<SwapDto>>> CreateMultiGiveaway([FromBody] CreateMultiGiveawayRequest req)
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
-        return FromListResult(await _swaps.CreateMultiGiveawayAsync(uid, req.ShiftId, req.RecipientIds, req.Message), Map);
+        return FromListResult(await _swaps.CreateMultiGiveawayAsync(uid, req.ShiftId, req.RecipientIds, req.Message, req.IsReperibile), Map);
     }
 
     [HttpPost("swap")]
     public async Task<ActionResult<SwapDto>> CreateSwap([FromBody] CreateSwapRequest req)
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
-        return FromResult(await _swaps.CreateSwapAsync(uid, req.MyShiftId, req.OtherShiftId, req.Message), Map);
+        return FromResult(await _swaps.CreateSwapAsync(uid, req.MyShiftId, req.OtherShiftId, req.Message, req.IsReperibile), Map);
     }
 
     [HttpPost("swap-multi")]
     public async Task<ActionResult<IEnumerable<SwapDto>>> CreateMultiSwap([FromBody] CreateMultiSwapRequest req)
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
-        return FromListResult(await _swaps.CreateMultiSwapAsync(uid, req.MyShiftId, req.CandidateShiftIds, req.Message), Map);
+        return FromListResult(await _swaps.CreateMultiSwapAsync(uid, req.MyShiftId, req.CandidateShiftIds, req.Message, req.IsReperibile), Map);
     }
 
     [HttpPost("pick/{shiftId:guid}")]

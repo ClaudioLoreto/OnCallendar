@@ -53,7 +53,8 @@ public sealed class ShiftsController : ControllerBase
         var toDate   = ShiftTimeHelper.TryParseDate(to)   ?? DateOnly.FromDateTime(DateTime.UtcNow).AddDays(30);
 
         var list = await _db.Shifts
-            .Include(s => s.MedicoTurno).Include(s => s.MedicoReperibile).Include(s => s.ExternalDoctor)
+            .Include(s => s.MedicoTurno).Include(s => s.MedicoReperibile)
+            .Include(s => s.ExternalDoctor).Include(s => s.ExternalDoctorReperibile)
             .Where(s => s.Date >= fromDate && s.Date <= toDate)
             .OrderBy(s => s.StartUtc)
             .ToListAsync();
@@ -70,7 +71,8 @@ public sealed class ShiftsController : ControllerBase
         var toDate   = ShiftTimeHelper.TryParseDate(to)   ?? DateOnly.FromDateTime(DateTime.UtcNow).AddDays(60);
 
         var list = await _db.Shifts
-            .Include(s => s.MedicoTurno).Include(s => s.MedicoReperibile).Include(s => s.ExternalDoctor)
+            .Include(s => s.MedicoTurno).Include(s => s.MedicoReperibile)
+            .Include(s => s.ExternalDoctor).Include(s => s.ExternalDoctorReperibile)
             .Where(s => s.Date >= fromDate && s.Date <= toDate &&
                         (s.MedicoTurnoId == uid || s.MedicoReperibileId == uid))
             .OrderBy(s => s.StartUtc)
@@ -133,10 +135,16 @@ public sealed class ShiftsController : ControllerBase
             return BadRequest(new { error = "Nome e cognome del medico esterno sono obbligatori." });
 
         var s = await _db.Shifts
-            .Include(x => x.MedicoTurno).Include(x => x.MedicoReperibile).Include(x => x.ExternalDoctor)
+            .Include(x => x.MedicoTurno).Include(x => x.MedicoReperibile)
+            .Include(x => x.ExternalDoctor).Include(x => x.ExternalDoctorReperibile)
             .FirstOrDefaultAsync(x => x.Id == id);
         if (s is null) return NotFound();
-        if (s.MedicoTurnoId != uid) return Forbid();
+
+        // Autorizzazione: il titolare del ruolo corrispondente.
+        var isRep = body?.IsReperibile ?? false;
+        var ownerId = isRep ? s.MedicoReperibileId : s.MedicoTurnoId;
+        if (ownerId != uid) return Forbid();
+
         if (s.EndUtc <= DateTime.UtcNow)
             return BadRequest(new { error = "Non puoi modificare un turno già concluso." });
 
@@ -222,34 +230,61 @@ public sealed class ShiftsController : ControllerBase
             }
         }
 
-        s.ExternalDoctorId = ext.Id;
-        s.ExternalDoctor = ext;
         s.UpdatedAtUtc = DateTime.UtcNow;
-        // Il turno esce dalla bacheca: è coperto.
-        if (s.Status == ShiftStatus.OnBoard) s.Status = ShiftStatus.Assigned;
-        _audit.Log("Shift", s.Id, $"AssignedToExternal:{ext.FullName}", s.TenantId);
+
+        if (isRep)
+        {
+            s.ExternalDoctorReperibileId = ext.Id;
+            s.ExternalDoctorReperibile = ext;
+        }
+        else
+        {
+            s.ExternalDoctorId = ext.Id;
+            s.ExternalDoctor = ext;
+            // Il turno esce dalla bacheca: è coperto.
+            if (s.Status == ShiftStatus.OnBoard) s.Status = ShiftStatus.Assigned;
+        }
+
+        var roleLabel = isRep ? "Reperibilità" : "Turno";
+        _audit.Log("Shift", s.Id, $"AssignedToExternal({roleLabel}):{ext.FullName}", s.TenantId);
         await _db.SaveChangesAsync();
 
         return Ok(Map(s, uid));
     }
 
-    /// <summary>Rimuove l'assegnazione del turno a un medico esterno (torna al titolare).</summary>
+    /// <summary>Rimuove l'assegnazione del turno/reperibilità a un medico esterno (torna al titolare).</summary>
     [HttpPost("{id:guid}/clear-external")]
-    public async Task<ActionResult<ShiftDto>> ClearExternal(Guid id)
+    public async Task<ActionResult<ShiftDto>> ClearExternal(Guid id, [FromQuery] bool isReperibile = false)
     {
         if (_user.UserId is not Guid uid) return Unauthorized();
         var s = await _db.Shifts
-            .Include(x => x.MedicoTurno).Include(x => x.MedicoReperibile).Include(x => x.ExternalDoctor)
+            .Include(x => x.MedicoTurno).Include(x => x.MedicoReperibile)
+            .Include(x => x.ExternalDoctor).Include(x => x.ExternalDoctorReperibile)
             .FirstOrDefaultAsync(x => x.Id == id);
         if (s is null) return NotFound();
-        if (s.MedicoTurnoId != uid) return Forbid();
-        if (s.ExternalDoctorId is null) return Ok(Map(s, uid));
 
-        var prev = s.ExternalDoctor?.FullName ?? "?";
-        s.ExternalDoctorId = null;
-        s.ExternalDoctor = null;
-        s.UpdatedAtUtc = DateTime.UtcNow;
-        _audit.Log("Shift", s.Id, $"ClearedExternal:{prev}", s.TenantId);
+        var ownerId = isReperibile ? s.MedicoReperibileId : s.MedicoTurnoId;
+        if (ownerId != uid) return Forbid();
+
+        if (isReperibile)
+        {
+            if (s.ExternalDoctorReperibileId is null) return Ok(Map(s, uid));
+            var prev = s.ExternalDoctorReperibile?.FullName ?? "?";
+            s.ExternalDoctorReperibileId = null;
+            s.ExternalDoctorReperibile = null;
+            s.UpdatedAtUtc = DateTime.UtcNow;
+            _audit.Log("Shift", s.Id, $"ClearedExternal(Reperibilità):{prev}", s.TenantId);
+        }
+        else
+        {
+            if (s.ExternalDoctorId is null) return Ok(Map(s, uid));
+            var prev = s.ExternalDoctor?.FullName ?? "?";
+            s.ExternalDoctorId = null;
+            s.ExternalDoctor = null;
+            s.UpdatedAtUtc = DateTime.UtcNow;
+            _audit.Log("Shift", s.Id, $"ClearedExternal(Turno):{prev}", s.TenantId);
+        }
+
         await _db.SaveChangesAsync();
         return Ok(Map(s, uid));
     }

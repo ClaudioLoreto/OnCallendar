@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, FlatList, RefreshControl, SafeAreaView, ScrollView, Text, TouchableOpacity, View,
+  Alert, FlatList, KeyboardAvoidingView, Platform, RefreshControl, SafeAreaView, ScrollView, Text, TouchableOpacity, View,
 } from 'react-native';
 import {
   Avatar, Badge, Button, Card, EmptyState, Field, Icon, SegmentedControl, Sheet,
 } from '../components/ui';
 import AppHeader from '../components/AppHeader';
 import {
-  CalendarApi, DayDto, MedicoDto, ShiftDto, SwapDto, SwapStatus, SwapsApi, UsersApi,
+  CalendarApi, DayDto, MedicoDto, ShiftDto, SwapDto, SwapStatus, SwapType, SwapsApi, UsersApi,
   CounterOfferDto,
   formatDayLong, shiftCodeIcon, shiftCodeShort, shiftCodeTone, swapStatusLabel, swapStatusTone, swapTypeLabel,
 } from '../api/endpoints';
@@ -18,7 +18,7 @@ import { useAuth } from '../auth/AuthContext';
 type Tab = 'incoming' | 'outgoing';
 type Props = {
   navigation: { navigate: (route: string, params?: any) => void; setParams?: (p: any) => void };
-  route?: { params?: { initialShiftId?: string; initialMode?: 'cessione' | 'scambio'; openSwapId?: string } };
+  route?: { params?: { initialShiftId?: string; initialMode?: 'cessione' | 'scambio'; openSwapId?: string; isReperibile?: boolean } };
 };
 
 export default function SwapsScreen({ navigation, route }: Props) {
@@ -46,6 +46,7 @@ export default function SwapsScreen({ navigation, route }: Props) {
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [stepError, setStepError] = useState<string | null>(null);
+  const [isReperibile, setIsReperibile] = useState(false);
 
   // Modal custom: avviso soglia di tutela (riposo/lavoro continuativo)
   const [warnOpen, setWarnOpen] = useState(false);
@@ -84,13 +85,26 @@ export default function SwapsScreen({ navigation, route }: Props) {
     })();
   }, [loadLists]);
 
+  // ── Polling automatico: refresh ogni 30 secondi per live updates ────
+  useEffect(() => {
+    if (loading) return;
+    const interval = setInterval(async () => {
+      try {
+        await loadLists();
+      } catch (err) {
+        console.error('Polling refresh error:', err);
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [loading, loadLists]);
+
   // Apertura wizard / trattativa da deep-link (calendario o notifica)
   useEffect(() => {
     const p = route?.params;
     if (!p) return;
     if (p.initialShiftId) {
-      openNew({ shiftId: p.initialShiftId, mode: p.initialMode ?? 'cessione' });
-      navigation.setParams?.({ initialShiftId: undefined, initialMode: undefined });
+      openNew({ shiftId: p.initialShiftId, mode: p.initialMode ?? 'cessione', isReperibile: p.isReperibile });
+      navigation.setParams?.({ initialShiftId: undefined, initialMode: undefined, isReperibile: undefined });
     } else if (p.openSwapId) {
       // Carica le liste, switcha sul tab giusto, evidenzio la card e scrollo.
       const targetId = p.openSwapId;
@@ -189,9 +203,10 @@ export default function SwapsScreen({ navigation, route }: Props) {
   };
 
   // ---- nuova richiesta ----
-  const openNew = useCallback(async (opts?: { shiftId?: string; mode?: 'cessione' | 'scambio' }) => {
+  const openNew = useCallback(async (opts?: { shiftId?: string; mode?: 'cessione' | 'scambio'; isReperibile?: boolean }) => {
     setNewOpen(true);
     setMode(opts?.mode ?? 'cessione');
+    setIsReperibile(opts?.isReperibile ?? false);
     setPickedShift(null); setPickedColleagues(new Set()); setPickedCounterShiftIds(new Set());
     setMessage(''); setStepError(null);
     try {
@@ -225,25 +240,29 @@ export default function SwapsScreen({ navigation, route }: Props) {
     setStepError(null);
   };
 
-  // I miei turni futuri (di cui sono medico di turno) — limitati al MESE CORRENTE
+  // I miei turni futuri (di cui sono medico di turno o reperibile) — limitati al MESE CORRENTE
   const myShifts = useMemo<ShiftDto[]>(() => {
     const now = new Date();
     const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const out: ShiftDto[] = [];
     for (const d of days) for (const s of d.shifts) {
-      if (s.isMineTurno && !s.isPast && s.date.startsWith(ym)) out.push(s);
+      const isMine = isReperibile ? s.isMineReperibile : s.isMineTurno;
+      if (isMine && !s.isPast && s.date.startsWith(ym)) out.push(s);
     }
     return out;
-  }, [days]);
+  }, [days, isReperibile]);
 
   // Date dei miei turni → set di stringhe (per evitare candidati nello stesso giorno)
   const myShiftDates = useMemo<Set<string>>(() => {
     const now = new Date();
     const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const s = new Set<string>();
-    for (const d of days) for (const sh of d.shifts) if (sh.isMineTurno && !sh.isPast && sh.date.startsWith(ym)) s.add(sh.date);
+    for (const d of days) for (const sh of d.shifts) {
+      const isMine = isReperibile ? sh.isMineReperibile : sh.isMineTurno;
+      if (isMine && !sh.isPast && sh.date.startsWith(ym)) s.add(sh.date);
+    }
     return s;
-  }, [days]);
+  }, [days, isReperibile]);
 
   // Turni candidati per scambio: tutti i turni futuri dei colleghi selezionati,
   // raggruppati per collega. Esclude i turni in giorni in cui ho già un mio turno
@@ -261,14 +280,16 @@ export default function SwapsScreen({ navigation, route }: Props) {
       for (const d of days) for (const s of d.shifts) {
         if (s.isPast) continue;
         if (!s.date.startsWith(ym)) continue;
-        if (s.medicoTurno?.id !== m.id) continue;
+        // Per reperibilità cerchiamo il medico reperibile, per turno il medico turno
+        const ownerMatch = isReperibile ? s.medicoReperibile?.id === m.id : s.medicoTurno?.id === m.id;
+        if (!ownerMatch) continue;
         if (myShiftDates.has(s.date) && s.date !== pickedShift?.date) continue;
         shifts.push(s);
       }
       if (shifts.length > 0) out.push({ medico: m, shifts });
     }
     return out;
-  }, [days, mode, pickedColleagues, colleagues, myShiftDates, pickedShift]);
+  }, [days, mode, pickedColleagues, colleagues, myShiftDates, pickedShift, isReperibile]);
 
   const submitNew = async () => {
     if (!pickedShift || pickedColleagues.size === 0) return;
@@ -280,9 +301,9 @@ export default function SwapsScreen({ navigation, route }: Props) {
           setSubmitting(false);
           return;
         }
-        await SwapsApi.swapMulti(pickedShift.id, Array.from(pickedCounterShiftIds), message || undefined);
+        await SwapsApi.swapMulti(pickedShift.id, Array.from(pickedCounterShiftIds), message || undefined, isReperibile);
       } else {
-        await SwapsApi.giveawayMulti(pickedShift.id, Array.from(pickedColleagues), message || undefined);
+        await SwapsApi.giveawayMulti(pickedShift.id, Array.from(pickedColleagues), message || undefined, isReperibile);
       }
       setNewOpen(false);
       setTab('outgoing');           // mostra subito la nuova richiesta in "Inviati"
@@ -320,12 +341,14 @@ export default function SwapsScreen({ navigation, route }: Props) {
   const myCounterShifts = useMemo<ShiftDto[]>(() => {
     const now = new Date();
     const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const rep = counterSwap?.isReperibile ?? false;
     const out: ShiftDto[] = [];
     for (const d of counterDays) for (const s of d.shifts) {
-      if (s.isMineTurno && !s.isPast && s.date.startsWith(ym)) out.push(s);
+      const isMine = rep ? s.isMineReperibile : s.isMineTurno;
+      if (isMine && !s.isPast && s.date.startsWith(ym)) out.push(s);
     }
     return out;
-  }, [counterDays]);
+  }, [counterDays, counterSwap?.isReperibile]);
 
   const submitCounter = async () => {
     if (!counterSwap || !counterPicked) return;
@@ -433,7 +456,7 @@ export default function SwapsScreen({ navigation, route }: Props) {
           }
           renderItem={({ item }) => {
             const isIncoming = tab === 'incoming';
-            const highlighted = highlightSwapId === item.id;
+            const highlighted = false; // highlight rimosso per UX
             return (
               <Card style={highlighted ? {
                 borderWidth: 2,
@@ -469,11 +492,11 @@ export default function SwapsScreen({ navigation, route }: Props) {
                     {item.pendingCounterOffersCount > 0 ? (
                       <View style={{
                         flexDirection: 'row', alignItems: 'center', gap: 8,
-                        backgroundColor: '#EDE9FE', borderRadius: theme.radius.m,
+                        backgroundColor: theme.colors.accent, borderRadius: theme.radius.m,
                         padding: theme.spacing.s,
                       }}>
-                        <Icon name="repeat-outline" size={16} color="#7c3aed" />
-                        <Text style={[theme.typography.caption, { color: '#5b21b6', flex: 1 }]}>
+                        <Icon name="repeat-outline" size={16} color={theme.colors.primary} />
+                        <Text style={[theme.typography.caption, { color: theme.colors.primary, flex: 1 }]}>
                           C'è una controproposta in attesa: rispondi prima qui sotto.
                         </Text>
                       </View>
@@ -488,7 +511,7 @@ export default function SwapsScreen({ navigation, route }: Props) {
                                 onPress={() => decide(item.id, 'accept')} />
                             </View>
                             <View style={{ flex: 1 }}>
-                              <Button title={t('swaps.reject')} variant="danger" icon="close" compact
+                              <Button title={t('swaps.reject')} variant="secondary" icon="close" compact
                                 loading={busyKey === `${item.id}:reject`}
                                 disabled={busyKey !== null && busyKey !== `${item.id}:reject`}
                                 onPress={() => decide(item.id, 'reject')} />
@@ -496,16 +519,26 @@ export default function SwapsScreen({ navigation, route }: Props) {
                           </>
                         ) : (
                           <View style={{ flex: 1 }}>
-                            <Button title={t('swaps.cancel')} variant="subtle" icon="trash-outline" compact
+                            <Button title="Ritira" variant="secondary" icon="arrow-undo-outline" compact
                               loading={busyKey === `${item.id}:cancel`}
                               onPress={() => decide(item.id, 'cancel')} />
                           </View>
                         )}
                       </View>
                     )}
-                    <Button title={item.pendingCounterOffersCount > 0 ? `Trattativa (${item.pendingCounterOffersCount})` : 'Controproposta'}
-                      variant="subtle" icon="repeat-outline" compact
-                      onPress={() => openCounter(item)} />
+                    {/* Controproposta / Trattativa:
+                        - Cessione (Giveaway): solo se ci sono counter-offers attive
+                        - Scambio outgoing: solo se l'altro ha già fatto una controproposta
+                        - Scambio incoming: sempre visibile (posso controproporre) */}
+                    {item.pendingCounterOffersCount > 0 ? (
+                      <Button title={`Trattativa (${item.pendingCounterOffersCount})`}
+                        variant="ghost" icon="repeat-outline" compact
+                        onPress={() => openCounter(item)} />
+                    ) : (isIncoming && item.type !== SwapType.Giveaway) ? (
+                      <Button title="Controproposta"
+                        variant="ghost" icon="repeat-outline" compact
+                        onPress={() => openCounter(item)} />
+                    ) : null}
                   </View>
                 ) : null}
               </Card>
@@ -894,16 +927,17 @@ export default function SwapsScreen({ navigation, route }: Props) {
 
       {/* Sheet trattativa / controproposte */}
       <Sheet visible={!!counterSwap} onClose={() => setCounterSwap(null)} title="Trattativa">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView keyboardShouldPersistTaps="handled">
           {counterSwap ? (
             <>
               <View style={{
                 flexDirection: 'row', alignItems: 'flex-start', gap: 8,
-                backgroundColor: '#EFF6FF', borderRadius: theme.radius.m,
+                backgroundColor: theme.colors.accent, borderRadius: theme.radius.m,
                 padding: theme.spacing.s, marginBottom: theme.spacing.m,
               }}>
-                <Icon name="information-circle-outline" size={18} color="#1d4ed8" />
-                <Text style={[theme.typography.caption, { flex: 1, color: '#1e3a8a', lineHeight: 18 }]}>
+                <Icon name="information-circle-outline" size={18} color={theme.colors.primary} />
+                <Text style={[theme.typography.caption, { flex: 1, color: theme.colors.primary, lineHeight: 18 }]}>
                   Seleziona un tuo turno qui sotto e premi <Text style={{ fontWeight: '700' }}>Proponi</Text>{' '}
                   per fare una controproposta. L'altra parte potrà accettare, rifiutare o rilanciare.
                 </Text>
@@ -927,7 +961,7 @@ export default function SwapsScreen({ navigation, route }: Props) {
               ) : (
                 <View style={{ gap: theme.spacing.s, marginBottom: theme.spacing.m }}>
                   {counterOffers.map(o => {
-                    const mine = o.proposedById === user?.id;
+                    const mine = o.proposedById === user?.userId;
                     return (
                       <View key={o.id} style={{
                         padding: theme.spacing.m, borderRadius: theme.radius.m,
@@ -946,11 +980,11 @@ export default function SwapsScreen({ navigation, route }: Props) {
                         {o.status === 'Pending' && !mine ? (
                           <View style={{ flexDirection: 'row', gap: theme.spacing.s, marginTop: theme.spacing.s }}>
                             <View style={{ flex: 1 }}>
-                              <Button title="Accetta" icon="checkmark" loading={counterBusy}
+                              <Button title="Accetta" icon="checkmark" compact loading={counterBusy}
                                 onPress={() => acceptCounterOffer(counterSwap.id, o.id)} />
                             </View>
                             <View style={{ flex: 1 }}>
-                              <Button title="Rifiuta" variant="danger" icon="close" loading={counterBusy}
+                              <Button title="Rifiuta" variant="secondary" icon="close" compact loading={counterBusy}
                                 onPress={() => rejectCounterOffer(counterSwap.id, o.id)} />
                             </View>
                           </View>
@@ -1020,6 +1054,7 @@ export default function SwapsScreen({ navigation, route }: Props) {
             </>
           ) : null}
         </ScrollView>
+        </KeyboardAvoidingView>
       </Sheet>
 
       {/* Sheet warning soglia di tutela (riposo / lavoro continuativo) */}

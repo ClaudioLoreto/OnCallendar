@@ -8,6 +8,7 @@ import {
 
 type Props = {
   shift: ShiftDto | null;
+  isReperibile?: boolean;
   onClose: () => void;
   onUpdated: (s: ShiftDto) => void;
 };
@@ -17,7 +18,7 @@ type Props = {
  * - Input nome + cognome con autocomplete sui medici esterni gia` censiti.
  * - Se il turno e` gia` assegnato a un esterno, mostra opzione "Riprendi turno".
  */
-export default function AssignExternalSheet({ shift, onClose, onUpdated }: Props) {
+export default function AssignExternalSheet({ shift, isReperibile = false, onClose, onUpdated }: Props) {
   const { theme } = useTheme();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName]   = useState('');
@@ -80,7 +81,7 @@ export default function AssignExternalSheet({ shift, onClose, onUpdated }: Props
     setSubmitting(true);
     setError(null);
     try {
-      const updated = await ShiftsApi.assignExternal(shift.id, firstName.trim(), lastName.trim(), phone.trim() || undefined, email.trim() || undefined);
+      const updated = await ShiftsApi.assignExternal(shift.id, firstName.trim(), lastName.trim(), phone.trim() || undefined, email.trim() || undefined, isReperibile);
       onUpdated(updated);
       onClose();
     } catch (e: any) {
@@ -95,7 +96,7 @@ export default function AssignExternalSheet({ shift, onClose, onUpdated }: Props
     setSubmitting(true);
     setError(null);
     try {
-      const updated = await ShiftsApi.clearExternal(shift.id);
+      const updated = await ShiftsApi.clearExternal(shift.id, isReperibile);
       onUpdated(updated);
       onClose();
     } catch (e: any) {
@@ -106,7 +107,7 @@ export default function AssignExternalSheet({ shift, onClose, onUpdated }: Props
   };
 
   return (
-    <Sheet visible={!!shift} onClose={onClose} title="Affida a medico esterno">
+    <Sheet visible={!!shift} onClose={onClose} title={isReperibile ? 'Affida reperibilit\u00e0 a medico esterno' : 'Affida a medico esterno'}>
       {shift ? (
         <ScrollView keyboardShouldPersistTaps="handled">
           {/* Riepilogo turno */}
@@ -127,34 +128,37 @@ export default function AssignExternalSheet({ shift, onClose, onUpdated }: Props
           </View>
 
           {/* Stato corrente */}
-          {shift.externalDoctor ? (
+          {(isReperibile ? shift.externalDoctorReperibile : shift.externalDoctor) ? (() => {
+            const ext = isReperibile ? shift.externalDoctorReperibile! : shift.externalDoctor!;
+            return (
             <View style={{
               padding: theme.spacing.m, borderRadius: theme.radius.m,
               backgroundColor: theme.colors.surfaceAlt, marginBottom: theme.spacing.m,
               borderWidth: 1, borderColor: theme.colors.border,
             }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <Avatar fullName={shift.externalDoctor.fullName} size={28} />
+                <Avatar fullName={ext.fullName} size={28} />
                 <View style={{ flex: 1 }}>
                   <Text style={[theme.typography.body, { fontWeight: '700' }]}>
-                    {shift.externalDoctor.fullName}
+                    {ext.fullName}
                   </Text>
                   <Text style={theme.typography.caption}>Medico esterno attualmente assegnato</Text>
                 </View>
                 <Badge label="Esterno" tone="warning" />
               </View>
               <Button
-                title="Riprendi turno (rimuovi esterno)"
+                title={isReperibile ? 'Riprendi reperibilit\u00e0 (rimuovi esterno)' : 'Riprendi turno (rimuovi esterno)'}
                 icon="close-circle-outline"
                 variant="secondary"
                 onPress={removeExternal}
                 disabled={submitting}
               />
             </View>
-          ) : null}
+            );
+          })() : null}
 
           <Text style={[theme.typography.caption, { marginBottom: theme.spacing.s }]}>
-            Inserisci nome e cognome del medico esterno che coprira` il turno.
+            Inserisci nome e cognome del medico esterno che coprir\u00e0 {isReperibile ? 'la reperibilit\u00e0' : 'il turno'}.
             Se l{"'"}hai gia` censito in passato lo trovi tra i suggerimenti.
           </Text>
 
@@ -246,7 +250,9 @@ export default function AssignExternalSheet({ shift, onClose, onUpdated }: Props
           ) : null}
 
           <Button
-            title={shift.externalDoctor ? 'Sostituisci medico esterno' : 'Affida turno'}
+            title={(isReperibile ? shift.externalDoctorReperibile : shift.externalDoctor)
+              ? 'Sostituisci medico esterno'
+              : isReperibile ? 'Affida reperibilit\u00e0' : 'Affida turno'}
             icon="checkmark-circle-outline"
             onPress={submit}
             disabled={submitting || !firstName.trim() || !lastName.trim()}

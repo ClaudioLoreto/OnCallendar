@@ -1,28 +1,36 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FlatList, RefreshControl, SafeAreaView, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, FlatList, RefreshControl, SafeAreaView, Text, TouchableOpacity, View } from 'react-native';
 import { Avatar, Badge, Card, EmptyState, Icon, SegmentedControl } from '../components/ui';
 import {
-  CalendarApi, ShiftDto, SwapDto, SwapsApi,
+  CalendarApi, ShiftDto, SwapDto, SwapStatus, SwapsApi, ReportsApi,
   formatDayLong, shiftCodeIcon, shiftCodeShort, shiftCodeTone,
   swapStatusLabel, swapStatusTone, swapTypeLabel,
 } from '../api/endpoints';
 import { useTheme } from '../theme/ThemeContext';
 import { useI18n } from '../i18n/I18nContext';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
+import { API_BASE_URL, getAuthToken } from '../api/apiClient';
 
 type Tab = 'shifts' | 'swaps';
 type Scope = 'mine' | 'all';
+type SortOrder = 'asc' | 'desc';
 
 export default function HistoryScreen() {
   const { theme } = useTheme();
   const { locale } = useI18n();
   const [tab, setTab] = useState<Tab>('shifts');
   const [scope, setScope] = useState<Scope>('mine');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('asc'); // Default ASC (dal 1° giorno)
+  const [swapSortOrder, setSwapSortOrder] = useState<SortOrder>('desc'); // Default DESC (più recenti prima)
   const [myShifts, setMyShifts] = useState<ShiftDto[]>([]);
   const [allShifts, setAllShifts] = useState<ShiftDto[]>([]);
   const [allSwaps, setAllSwaps] = useState<SwapDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [monthOffset, setMonthOffset] = useState(0); // 0 = mese corrente
+  const [showRejected, setShowRejected] = useState(false); // toggle per rifiutati nello storico scambi
 
   // ---- filtro mese derivato dall'offset ----
   const filterMonth = useMemo(() => {
@@ -40,19 +48,33 @@ export default function HistoryScreen() {
 
   const filteredShifts = useMemo(() => {
     const y = filterMonth.getFullYear(); const m = filterMonth.getMonth();
-    return sourceShifts.filter(s => {
+    const filtered = sourceShifts.filter(s => {
       const d = new Date(s.date);
       return d.getFullYear() === y && d.getMonth() === m;
     });
-  }, [sourceShifts, filterMonth]);
+    // Ordina in base a sortOrder
+    const cmp = sortOrder === 'asc'
+      ? (a: ShiftDto, b: ShiftDto) => a.startUtc.localeCompare(b.startUtc)
+      : (a: ShiftDto, b: ShiftDto) => b.startUtc.localeCompare(a.startUtc);
+    return filtered.sort(cmp);
+  }, [sourceShifts, filterMonth, sortOrder]);
 
   const filteredSwaps = useMemo(() => {
     const y = filterMonth.getFullYear(); const m = filterMonth.getMonth();
-    return allSwaps.filter(s => {
+    const filtered = allSwaps.filter(s => {
       const d = new Date(s.initiatorShift.date);
-      return d.getFullYear() === y && d.getMonth() === m;
+      if (d.getFullYear() !== y || d.getMonth() !== m) return false;
+      // Mai mostrare le annullate
+      if (s.status === SwapStatus.Cancelled) return false;
+      // Rifiutate solo se toggle attivo
+      if (s.status === SwapStatus.Rejected && !showRejected) return false;
+      return true;
     });
-  }, [allSwaps, filterMonth]);
+    const cmp = swapSortOrder === 'asc'
+      ? (a: SwapDto, b: SwapDto) => a.initiatorShift.date.localeCompare(b.initiatorShift.date)
+      : (a: SwapDto, b: SwapDto) => b.initiatorShift.date.localeCompare(a.initiatorShift.date);
+    return filtered.sort(cmp);
+  }, [allSwaps, filterMonth, swapSortOrder, showRejected]);
 
   // ---- caricamento: 24 mesi di storia ----
   const load = useCallback(async () => {
@@ -69,18 +91,110 @@ export default function HistoryScreen() {
       all.push(s);
       if (s.isMineTurno || s.isMineReperibile) mine.push(s);
     }
-    // "I miei" desc (più recente in alto), "Tutti" asc (dal 1° al 30 del mese)
-    const cmpDesc = (a: ShiftDto, b: ShiftDto) => b.startUtc.localeCompare(a.startUtc);
-    const cmpAsc  = (a: ShiftDto, b: ShiftDto) => a.startUtc.localeCompare(b.startUtc);
-    setMyShifts(mine.sort(cmpDesc));
-    setAllShifts(all.sort(cmpAsc));
+    // Entrambi partiranno da ASC di default (dal 1° giorno del mese all'ultimo).
+    // L'utente può invertire con la freccia.
+    const cmpAsc = (a: ShiftDto, b: ShiftDto) => a.startUtc.localeCompare(b.startUtc);
+    setMyShifts([...mine].sort(cmpAsc));
+    setAllShifts([...all].sort(cmpAsc));
     setAllSwaps(history.sort((a, b) => b.createdAtUtc.localeCompare(a.createdAtUtc)));
   }, []);
 
   useEffect(() => { (async () => { try { await load(); } finally { setLoading(false); } })(); }, [load]);
 
+  // ---- Polling automatico: refresh ogni 30 secondi per live updates ----
+  useEffect(() => {
+    if (loading) return; // Non partire finché il primo load non è completato
+    const interval = setInterval(async () => {
+      try {
+        await load();
+      } catch (err) {
+        console.error('Polling refresh error:', err);
+      }
+    }, 30000); // 30 secondi
+    return () => clearInterval(interval);
+  }, [loading, load]);
+
   const onRefresh = async () => {
     setRefreshing(true); try { await load(); } finally { setRefreshing(false); }
+  };
+
+  // ---- Export Excel ----
+  const handleExportExcel = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const year = filterMonth.getFullYear();
+      const month = filterMonth.getMonth() + 1;
+      const endpoint = scope === 'mine'
+        ? `/api/reports/my-history-excel?year=${year}&month=${month}`
+        : `/api/reports/all-history-excel?year=${year}&month=${month}`;
+
+      const fileName = scope === 'mine'
+        ? `Storico_Personale_${year}_${String(month).padStart(2, '0')}.xlsx`
+        : `Storico_Completo_${year}_${String(month).padStart(2, '0')}.xlsx`;
+      const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
+
+      const token = getAuthToken();
+      const downloadResult = await FileSystem.downloadAsync(
+        `${API_BASE_URL}${endpoint}`,
+        fileUri,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+
+      if (downloadResult.status === 200) {
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(fileUri, {
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            dialogTitle: fileName,
+          });
+        } else {
+          Alert.alert('Download', `File pronto: ${fileName}`);
+        }
+      } else {
+        throw new Error(`Download fallito (${downloadResult.status})`);
+      }
+    } catch (err: any) {
+      Alert.alert('Errore', err?.message ?? 'Export fallito');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // ---- Export Excel scambi ----
+  const handleExportSwapExcel = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const year = filterMonth.getFullYear();
+      const month = filterMonth.getMonth() + 1;
+      const endpoint = `/api/reports/swap-history-excel?year=${year}&month=${month}`;
+      const fileName = `Scambi_${year}_${String(month).padStart(2, '0')}.xlsx`;
+      const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
+
+      const token = getAuthToken();
+      const downloadResult = await FileSystem.downloadAsync(
+        `${API_BASE_URL}${endpoint}`,
+        fileUri,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+
+      if (downloadResult.status === 200) {
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(fileUri, {
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            dialogTitle: fileName,
+          });
+        } else {
+          Alert.alert('Download', `File pronto: ${fileName}`);
+        }
+      } else {
+        throw new Error(`Download fallito (${downloadResult.status})`);
+      }
+    } catch (err: any) {
+      Alert.alert('Errore', err?.message ?? 'Export fallito');
+    } finally {
+      setExporting(false);
+    }
   };
 
   // ---- Selettore mese ----
@@ -118,16 +232,144 @@ export default function HistoryScreen() {
       {/* Filtro ambito: visibile solo nel tab Turni */}
       {tab === 'shifts' ? (
         <View style={{ paddingHorizontal: theme.spacing.l, paddingBottom: theme.spacing.s }}>
-          <SegmentedControl<Scope>
-            value={scope}
-            onChange={setScope}
-            options={[
-              { label: 'Solo i miei', value: 'mine' },
-              { label: 'Tutti', value: 'all' },
-            ]}
-          />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.s }}>
+            <View style={{ flex: 1 }}>
+              <SegmentedControl<Scope>
+                value={scope}
+                onChange={setScope}
+                options={[
+                  { label: 'Solo i miei', value: 'mine' },
+                  { label: 'Tutti', value: 'all' },
+                ]}
+              />
+            </View>
+            {/* Bottone ordinamento ASC/DESC */}
+            <TouchableOpacity
+              onPress={() => setSortOrder(o => o === 'asc' ? 'desc' : 'asc')}
+              hitSlop={12}
+              style={{
+                backgroundColor: theme.colors.surfaceAlt,
+                borderRadius: theme.radius.m,
+                paddingVertical: theme.spacing.s,
+                paddingHorizontal: theme.spacing.s,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 2,
+              }}
+            >
+              <Icon
+                name="arrow-up"
+                size={16}
+                color={sortOrder === 'asc' ? theme.colors.primary : theme.colors.textMuted}
+              />
+              <Icon
+                name="arrow-down"
+                size={16}
+                color={sortOrder === 'desc' ? theme.colors.primary : theme.colors.textMuted}
+              />
+            </TouchableOpacity>
+            {/* Bottone export Excel */}
+            <TouchableOpacity
+              onPress={handleExportExcel}
+              disabled={exporting}
+              hitSlop={12}
+              style={{
+                backgroundColor: exporting ? theme.colors.border : theme.colors.success,
+                borderRadius: theme.radius.m,
+                padding: theme.spacing.s,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                opacity: exporting ? 0.6 : 1,
+              }}
+            >
+              <Icon
+                name={exporting ? 'hourglass-outline' : 'download-outline'}
+                size={20}
+                color={exporting ? theme.colors.text : theme.colors.white}
+              />
+            </TouchableOpacity>
+          </View>
         </View>
-      ) : null}
+      ) : (
+        <View style={{ paddingHorizontal: theme.spacing.l, paddingBottom: theme.spacing.s }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: theme.spacing.s }}>
+            {/* Toggle rifiutati */}
+            <TouchableOpacity
+              onPress={() => setShowRejected(v => !v)}
+              hitSlop={12}
+              style={{
+                backgroundColor: showRejected ? theme.colors.accent : theme.colors.surfaceAlt,
+                borderRadius: theme.radius.m,
+                paddingVertical: theme.spacing.s,
+                paddingHorizontal: theme.spacing.m,
+                borderWidth: 1,
+                borderColor: showRejected ? theme.colors.primary : theme.colors.border,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <Icon
+                name={showRejected ? 'eye' : 'eye-off-outline'}
+                size={14}
+                color={showRejected ? theme.colors.primary : theme.colors.textMuted}
+              />
+              <Text style={[theme.typography.caption, { color: showRejected ? theme.colors.primary : theme.colors.textMuted }]}>
+                Rifiutati
+              </Text>
+            </TouchableOpacity>
+            {/* Bottone ordinamento ASC/DESC scambi */}
+            <TouchableOpacity
+              onPress={() => setSwapSortOrder(o => o === 'asc' ? 'desc' : 'asc')}
+              hitSlop={12}
+              style={{
+                backgroundColor: theme.colors.surfaceAlt,
+                borderRadius: theme.radius.m,
+                paddingVertical: theme.spacing.s,
+                paddingHorizontal: theme.spacing.s,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 2,
+              }}
+            >
+              <Icon
+                name="arrow-up"
+                size={16}
+                color={swapSortOrder === 'asc' ? theme.colors.primary : theme.colors.textMuted}
+              />
+              <Icon
+                name="arrow-down"
+                size={16}
+                color={swapSortOrder === 'desc' ? theme.colors.primary : theme.colors.textMuted}
+              />
+            </TouchableOpacity>
+            {/* Bottone export Excel scambi */}
+            <TouchableOpacity
+              onPress={handleExportSwapExcel}
+              disabled={exporting}
+              hitSlop={12}
+              style={{
+                backgroundColor: exporting ? theme.colors.border : theme.colors.success,
+                borderRadius: theme.radius.m,
+                padding: theme.spacing.s,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                opacity: exporting ? 0.6 : 1,
+              }}
+            >
+              <Icon
+                name={exporting ? 'hourglass-outline' : 'download-outline'}
+                size={20}
+                color={exporting ? theme.colors.text : theme.colors.white}
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       {loading ? (
         <EmptyState title="Caricamento…" />

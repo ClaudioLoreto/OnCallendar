@@ -30,6 +30,7 @@ export default function CalendarScreen({ navigation }: Props) {
 
   // Sheet azioni sul mio turno
   const [actionShift, setActionShift] = useState<ShiftDto | null>(null);
+  const [actionIsReperibile, setActionIsReperibile] = useState(false);
   const [externalShift, setExternalShift] = useState<ShiftDto | null>(null);
 
   const load = useCallback(async () => {
@@ -47,6 +48,19 @@ export default function CalendarScreen({ navigation }: Props) {
       finally { setLoading(false); }
     })();
   }, [load]);
+
+  // ── Polling automatico: refresh ogni 30 secondi per live updates ────
+  useEffect(() => {
+    if (loading) return;
+    const interval = setInterval(async () => {
+      try {
+        await load();
+      } catch (err) {
+        console.error('Polling refresh error:', err);
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [loading, load]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -77,14 +91,21 @@ export default function CalendarScreen({ navigation }: Props) {
 
   // ---- Azioni sul mio turno ----
   const openActions = (s: ShiftDto) => {
-    if (!s.isMineTurno || s.isPast) return;
-    setActionShift(s);
+    if (s.isPast) return;
+    if (s.isMineTurno) {
+      setActionIsReperibile(false);
+      setActionShift(s);
+    } else if (s.isMineReperibile) {
+      setActionIsReperibile(true);
+      setActionShift(s);
+    }
   };
   const goToWizard = (mode: 'cessione' | 'scambio') => {
     if (!actionShift) return;
     const id = actionShift.id;
+    const rep = actionIsReperibile;
     setActionShift(null);
-    navigation.navigate('Swaps', { initialShiftId: id, initialMode: mode });
+    navigation.navigate('Swaps', { initialShiftId: id, initialMode: mode, isReperibile: rep });
   };
 
   // ---- Render ----
@@ -96,7 +117,7 @@ export default function CalendarScreen({ navigation }: Props) {
     return (
       <TouchableOpacity
         key={s.id}
-        activeOpacity={s.isMineTurno && !s.isPast ? 0.7 : 1}
+        activeOpacity={(s.isMineTurno || s.isMineReperibile) && !s.isPast ? 0.7 : 1}
         onPress={() => openActions(s)}
         style={{
           borderTopWidth: 1,
@@ -291,7 +312,7 @@ export default function CalendarScreen({ navigation }: Props) {
       )}
 
       {/* Sheet azioni sul mio turno */}
-      <Sheet visible={!!actionShift} onClose={() => setActionShift(null)} title="Gestisci turno">
+      <Sheet visible={!!actionShift} onClose={() => setActionShift(null)} title={actionIsReperibile ? 'Gestisci reperibilità' : 'Gestisci turno'}>
         {actionShift ? (
           <ScrollView>
             <View style={{
@@ -351,18 +372,18 @@ export default function CalendarScreen({ navigation }: Props) {
             ) : (
               <View style={{ gap: theme.spacing.s }}>
                 <Button
-                  title="Proponi cessione"
+                  title={actionIsReperibile ? 'Cedi reperibilità' : 'Proponi cessione'}
                   icon="arrow-forward-circle-outline"
                   onPress={() => goToWizard('cessione')}
                 />
                 <Button
-                  title="Proponi scambio"
+                  title={actionIsReperibile ? 'Scambia reperibilità' : 'Proponi scambio'}
                   icon="swap-horizontal-outline"
                   variant="secondary"
                   onPress={() => goToWizard('scambio')}
                 />
                 <Button
-                  title="Affida a medico esterno"
+                  title={actionIsReperibile ? 'Affida reperibilit\u00e0 a esterno' : 'Affida a medico esterno'}
                   icon="person-add-outline"
                   variant="secondary"
                   onPress={() => {
@@ -380,6 +401,7 @@ export default function CalendarScreen({ navigation }: Props) {
       {/* Sheet assegnazione medico esterno */}
       <AssignExternalSheet
         shift={externalShift}
+        isReperibile={actionIsReperibile}
         onClose={() => setExternalShift(null)}
         onUpdated={(updated) => {
           // Aggiorno il turno nella lista in memoria

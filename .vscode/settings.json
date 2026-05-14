@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^powershell -NoProfile -Command \"\\[System\\.Management\\.Automation\\.Language\\.Parser\\]::ParseFile\\('\\$PWD\\\\dev\\.ps1', \\[ref\\]\\$null, \\[ref\\]\\$null\\)\" 2>&1 \\| Select-Object -First 20$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

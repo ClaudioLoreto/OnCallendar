@@ -15,6 +15,7 @@ import CalendarScreen from '../screens/CalendarScreen';
 import SwapsScreen from '../screens/SwapsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import HistoryScreen from '../screens/HistoryScreen';
+import DashboardScreen from '../screens/DashboardScreen';
 import NotificationsScreen from '../screens/NotificationsScreen';
 import NotificationPreferencesScreen from '../screens/NotificationPreferencesScreen';
 import PasswordExpiredScreen from '../screens/PasswordExpiredScreen';
@@ -45,6 +46,7 @@ const MainTabs: React.FC = () => {
     >
       <Tabs.Screen name="Calendar" component={CalendarScreen} options={{ title: t('tabs.calendar'), tabBarIcon: tabIcon('calendar-outline', 'calendar') }} />
       <Tabs.Screen name="Swaps"    component={SwapsScreen}    options={{ title: t('tabs.swaps'),    tabBarIcon: tabIcon('swap-horizontal-outline', 'swap-horizontal') }} />
+      <Tabs.Screen name="Dashboard" component={DashboardScreen} options={{ title: t('tabs.dashboard'), tabBarIcon: tabIcon('stats-chart-outline', 'stats-chart') }} />
     </Tabs.Navigator>
   );
 };

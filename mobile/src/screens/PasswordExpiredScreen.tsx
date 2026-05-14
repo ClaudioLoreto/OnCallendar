@@ -22,6 +22,7 @@ export default function PasswordExpiredScreen({ onPasswordChanged }: Props) {
   const [newPwd, setNewPwd] = useState('');
   const [newPwd2, setNewPwd2] = useState('');
   const [busy, setBusy] = useState(false);
+  const [pwdError, setPwdError] = useState<string | null>(null);
   const [popup, setPopup] = useState<{ title: string; message?: string; tone?: any; icon?: any } | null>(null);
 
   const strong = useMemo(() => isPasswordStrong(newPwd), [newPwd]);
@@ -34,13 +35,14 @@ export default function PasswordExpiredScreen({ onPasswordChanged }: Props) {
       return;
     }
     setBusy(true);
+    setPwdError(null);
     try {
       await UsersApi.changePassword(oldPwd, newPwd);
       setPopup({ title: 'Password aggiornata', message: 'Ora puoi continuare a usare l\'app normalmente.', tone: 'success', icon: 'shield-checkmark-outline' });
       setTimeout(() => { setPopup(null); onPasswordChanged(); }, 1500);
     } catch (e: any) {
       const msg = e?.response?.data?.errors?.join(' ') ?? e?.response?.data?.error ?? 'Cambio password non riuscito.';
-      setPopup({ title: 'Errore', message: msg, tone: 'danger', icon: 'alert-circle-outline' });
+      setPwdError(msg);
     } finally {
       setBusy(false);
     }
@@ -90,7 +92,12 @@ export default function PasswordExpiredScreen({ onPasswordChanged }: Props) {
             Ciao {user?.fullName ?? ''}, sono passati più di 12 mesi dall'ultimo cambio password.
             Imposta una nuova password rispettando i requisiti.
           </Text>
-          <PasswordField label="Password attuale" value={oldPwd} onChangeText={setOldPwd} />
+          <PasswordField label="Password attuale" value={oldPwd} onChangeText={(v: string) => { setOldPwd(v); setPwdError(null); }} />
+          {pwdError ? (
+            <Text style={{ color: theme.colors.danger, marginTop: -theme.spacing.s, marginBottom: theme.spacing.s }}>
+              {pwdError}
+            </Text>
+          ) : null}
           <PasswordField label="Nuova password" value={newPwd} onChangeText={setNewPwd} />
           {newPwd.length > 0 ? <PasswordRules value={newPwd} /> : null}
           {newPwd.length > 0 && oldPwd.length > 0 && newPwd === oldPwd ? (

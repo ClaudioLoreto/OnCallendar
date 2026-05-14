@@ -44,6 +44,13 @@ public class Shift : BaseEntity, ITenantScoped, ISoftDeletable
     public Guid? ExternalDoctorId { get; set; }
     public ExternalDoctor? ExternalDoctor { get; set; }
 
+    /// <summary>
+    /// Medico ESTERNO che copre la reperibilità (al posto del reperibile).
+    /// Stessa semantica di <see cref="ExternalDoctorId"/> ma per il ruolo reperibile.
+    /// </summary>
+    public Guid? ExternalDoctorReperibileId { get; set; }
+    public ExternalDoctor? ExternalDoctorReperibile { get; set; }
+
     public ShiftStatus Status { get; set; } = ShiftStatus.Assigned;
 
     public string? Notes { get; set; }

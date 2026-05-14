@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using OnCallendar.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using OnCallendar.Infrastructure.Persistence;
 namespace OnCallendar.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260513204817_AddSwapRequestIsReperibile")]
+    partial class AddSwapRequestIsReperibile
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -795,9 +798,6 @@ namespace OnCallendar.Infrastructure.Migrations
                     b.Property<Guid?>("ExternalDoctorId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("ExternalDoctorReperibileId")
-                        .HasColumnType("uuid");
-
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
@@ -831,8 +831,6 @@ namespace OnCallendar.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ExternalDoctorId");
-
-                    b.HasIndex("ExternalDoctorReperibileId");
 
                     b.HasIndex("MedicoReperibileId");
 
@@ -1244,11 +1242,6 @@ namespace OnCallendar.Infrastructure.Migrations
                         .HasForeignKey("ExternalDoctorId")
                         .OnDelete(DeleteBehavior.SetNull);
 
-                    b.HasOne("OnCallendar.Domain.Entities.ExternalDoctor", "ExternalDoctorReperibile")
-                        .WithMany()
-                        .HasForeignKey("ExternalDoctorReperibileId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.HasOne("OnCallendar.Domain.Entities.ApplicationUser", "MedicoReperibile")
                         .WithMany()
                         .HasForeignKey("MedicoReperibileId")
@@ -1266,8 +1259,6 @@ namespace OnCallendar.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("ExternalDoctor");
-
-                    b.Navigation("ExternalDoctorReperibile");
 
                     b.Navigation("MedicoReperibile");
 

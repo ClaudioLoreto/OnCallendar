@@ -126,11 +126,12 @@ public sealed class SwapService : ISwapService
     // ── Create Giveaway ──
 
     public async Task<ServiceResult<SwapRequest>> CreateGiveawayAsync(
-        Guid userId, Guid shiftId, Guid toMedicoId, string? message)
+        Guid userId, Guid shiftId, Guid toMedicoId, string? message, bool isReperibile = false)
     {
         var shift = await _db.Shifts.FirstOrDefaultAsync(s => s.Id == shiftId);
         if (shift is null) return ServiceResult<SwapRequest>.NotFound("Turno inesistente.");
-        if (shift.MedicoTurnoId != userId) return ServiceResult<SwapRequest>.Forbidden();
+        var ownerId = isReperibile ? shift.MedicoReperibileId : shift.MedicoTurnoId;
+        if (ownerId != userId) return ServiceResult<SwapRequest>.Forbidden();
         if (shift.StartUtc <= DateTime.UtcNow)
             return ServiceResult<SwapRequest>.ValidationError("Turno già iniziato.");
 
@@ -152,11 +153,12 @@ public sealed class SwapService : ISwapService
             InitiatorShiftId = shift.Id,
             CounterpartMedicoId = to.Id,
             Message = message,
+            IsReperibile = isReperibile,
             CreatedAtUtc = DateTime.UtcNow,
         };
         _db.SwapRequests.Add(swap);
         _audit.Log("SwapRequest", swap.Id, "GiveawayCreated", shift.TenantId,
-            newValues: new { swap.InitiatorMedicoId, swap.CounterpartMedicoId, swap.InitiatorShiftId });
+            newValues: new { swap.InitiatorMedicoId, swap.CounterpartMedicoId, swap.InitiatorShiftId, swap.IsReperibile });
 
         var initiator = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
         await _db.SaveChangesAsync();
@@ -174,7 +176,7 @@ public sealed class SwapService : ISwapService
     // ── Create Multi Giveaway ──
 
     public async Task<ServiceResult<IReadOnlyList<SwapRequest>>> CreateMultiGiveawayAsync(
-        Guid userId, Guid shiftId, List<Guid> recipientIds, string? message)
+        Guid userId, Guid shiftId, List<Guid> recipientIds, string? message, bool isReperibile = false)
     {
         if (recipientIds is null || recipientIds.Count == 0)
             return ServiceResult<IReadOnlyList<SwapRequest>>.ValidationError("Seleziona almeno un destinatario.");
@@ -183,7 +185,8 @@ public sealed class SwapService : ISwapService
 
         var shift = await _db.Shifts.FirstOrDefaultAsync(s => s.Id == shiftId);
         if (shift is null) return ServiceResult<IReadOnlyList<SwapRequest>>.NotFound("Turno inesistente.");
-        if (shift.MedicoTurnoId != userId) return ServiceResult<IReadOnlyList<SwapRequest>>.Forbidden();
+        var ownerId = isReperibile ? shift.MedicoReperibileId : shift.MedicoTurnoId;
+        if (ownerId != userId) return ServiceResult<IReadOnlyList<SwapRequest>>.Forbidden();
         if (shift.StartUtc <= DateTime.UtcNow)
             return ServiceResult<IReadOnlyList<SwapRequest>>.ValidationError("Turno già iniziato o passato.");
 
@@ -217,6 +220,7 @@ public sealed class SwapService : ISwapService
                 InitiatorShiftId = shift.Id,
                 CounterpartMedicoId = to.Id,
                 Message = message,
+                IsReperibile = isReperibile,
                 CreatedAtUtc = DateTime.UtcNow,
             };
             _db.SwapRequests.Add(swap);
@@ -224,7 +228,7 @@ public sealed class SwapService : ISwapService
         }
 
         _audit.Log("SwapRequest", Guid.NewGuid(), "MultiGiveawayCreated", shift.TenantId,
-            newValues: new { ShiftId = shift.Id, RecipientCount = created.Count });
+            newValues: new { ShiftId = shift.Id, RecipientCount = created.Count, IsReperibile = isReperibile });
         await _db.SaveChangesAsync();
 
         var notifs = new List<NotificationRequest>();
@@ -246,15 +250,17 @@ public sealed class SwapService : ISwapService
     // ── Create Swap ──
 
     public async Task<ServiceResult<SwapRequest>> CreateSwapAsync(
-        Guid userId, Guid myShiftId, Guid otherShiftId, string? message)
+        Guid userId, Guid myShiftId, Guid otherShiftId, string? message, bool isReperibile = false)
     {
         var mine = await _db.Shifts.FirstOrDefaultAsync(s => s.Id == myShiftId);
         var other = await _db.Shifts.FirstOrDefaultAsync(s => s.Id == otherShiftId);
         if (mine is null || other is null) return ServiceResult<SwapRequest>.NotFound();
-        if (mine.MedicoTurnoId != userId) return ServiceResult<SwapRequest>.Forbidden();
-        if (other.MedicoTurnoId is null)
+        var myOwnerId = isReperibile ? mine.MedicoReperibileId : mine.MedicoTurnoId;
+        if (myOwnerId != userId) return ServiceResult<SwapRequest>.Forbidden();
+        var otherOwnerId = isReperibile ? other.MedicoReperibileId : other.MedicoTurnoId;
+        if (otherOwnerId is null)
             return ServiceResult<SwapRequest>.ValidationError("Turno destinazione non assegnato.");
-        if (other.MedicoTurnoId == userId)
+        if (otherOwnerId == userId)
             return ServiceResult<SwapRequest>.ValidationError("Non puoi scambiare con te stesso.");
 
         var alreadyPending = await _db.SwapRequests.AnyAsync(r =>
@@ -271,17 +277,18 @@ public sealed class SwapService : ISwapService
             Status = SwapRequestStatus.Pending,
             InitiatorMedicoId = userId,
             InitiatorShiftId = mine.Id,
-            CounterpartMedicoId = other.MedicoTurnoId,
+            CounterpartMedicoId = otherOwnerId,
             CounterpartShiftId = other.Id,
             Message = message,
+            IsReperibile = isReperibile,
             CreatedAtUtc = DateTime.UtcNow,
         };
         _db.SwapRequests.Add(swap);
         _audit.Log("SwapRequest", swap.Id, "SwapCreated", mine.TenantId,
-            newValues: new { swap.InitiatorShiftId, swap.CounterpartShiftId });
+            newValues: new { swap.InitiatorShiftId, swap.CounterpartShiftId, swap.IsReperibile });
 
         var swapInitiator = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
-        var counterpartUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == other.MedicoTurnoId!.Value);
+        var counterpartUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == otherOwnerId!.Value);
         await _db.SaveChangesAsync();
 
         swap.InitiatorMedico = swapInitiator!;
@@ -289,7 +296,7 @@ public sealed class SwapService : ISwapService
         swap.InitiatorShift = mine;
         swap.CounterpartShift = other;
         await _dispatcher.DispatchAsync(BuildSwap(
-            mine.TenantId, other.MedicoTurnoId!.Value,
+            mine.TenantId, otherOwnerId!.Value,
             NotificationTypeCodes.SwapRequested,
             swap, recipient: counterpartUser, actor: swapInitiator));
 
@@ -299,21 +306,25 @@ public sealed class SwapService : ISwapService
     // ── Create Multi Swap ──
 
     public async Task<ServiceResult<IReadOnlyList<SwapRequest>>> CreateMultiSwapAsync(
-        Guid userId, Guid myShiftId, List<Guid> candidateShiftIds, string? message)
+        Guid userId, Guid myShiftId, List<Guid> candidateShiftIds, string? message, bool isReperibile = false)
     {
         if (candidateShiftIds is null || candidateShiftIds.Count == 0)
             return ServiceResult<IReadOnlyList<SwapRequest>>.ValidationError("Seleziona almeno un turno candidato.");
 
         var mine = await _db.Shifts.FirstOrDefaultAsync(s => s.Id == myShiftId);
         if (mine is null) return ServiceResult<IReadOnlyList<SwapRequest>>.NotFound("Turno non trovato.");
-        if (mine.MedicoTurnoId != userId) return ServiceResult<IReadOnlyList<SwapRequest>>.Forbidden();
+        var myOwnerId = isReperibile ? mine.MedicoReperibileId : mine.MedicoTurnoId;
+        if (myOwnerId != userId) return ServiceResult<IReadOnlyList<SwapRequest>>.Forbidden();
         if (mine.StartUtc <= DateTime.UtcNow)
             return ServiceResult<IReadOnlyList<SwapRequest>>.ValidationError("Turno già iniziato o passato.");
 
         var distinct = candidateShiftIds.Distinct().ToList();
-        var candidates = await _db.Shifts
-            .Where(s => distinct.Contains(s.Id) && s.MedicoTurnoId != null && s.MedicoTurnoId != userId)
-            .ToListAsync();
+        IQueryable<Shift> candidateQuery;
+        if (isReperibile)
+            candidateQuery = _db.Shifts.Where(s => distinct.Contains(s.Id) && s.MedicoReperibileId != null && s.MedicoReperibileId != userId);
+        else
+            candidateQuery = _db.Shifts.Where(s => distinct.Contains(s.Id) && s.MedicoTurnoId != null && s.MedicoTurnoId != userId);
+        var candidates = await candidateQuery.ToListAsync();
         if (candidates.Count == 0)
             return ServiceResult<IReadOnlyList<SwapRequest>>.ValidationError("Nessun turno candidato valido.");
 
@@ -334,6 +345,7 @@ public sealed class SwapService : ISwapService
 
         foreach (var cand in candidates)
         {
+            var candOwnerId = isReperibile ? cand.MedicoReperibileId!.Value : cand.MedicoTurnoId!.Value;
             var swap = new SwapRequest
             {
                 TenantId = mine.TenantId,
@@ -341,19 +353,20 @@ public sealed class SwapService : ISwapService
                 Status = SwapRequestStatus.Pending,
                 InitiatorMedicoId = userId,
                 InitiatorShiftId = mine.Id,
-                CounterpartMedicoId = cand.MedicoTurnoId!.Value,
+                CounterpartMedicoId = candOwnerId,
                 CounterpartShiftId = cand.Id,
                 Message = message,
+                IsReperibile = isReperibile,
                 CreatedAtUtc = DateTime.UtcNow,
             };
             _db.SwapRequests.Add(swap);
-            var to = await _db.Users.FirstOrDefaultAsync(u => u.Id == cand.MedicoTurnoId!.Value);
+            var to = await _db.Users.FirstOrDefaultAsync(u => u.Id == candOwnerId);
             if (to != null) notifiedRecipients.Add((swap, to, cand));
             created.Add(swap);
         }
 
         _audit.Log("SwapRequest", Guid.NewGuid(), "MultiSwapCreated", mine.TenantId,
-            newValues: new { MyShiftId = mine.Id, CandidateCount = created.Count });
+            newValues: new { MyShiftId = mine.Id, CandidateCount = created.Count, IsReperibile = isReperibile });
         await _db.SaveChangesAsync();
 
         var notifs = new List<NotificationRequest>();
@@ -534,43 +547,89 @@ public sealed class SwapService : ISwapService
 
         await using var tx = await _db.Database.BeginTransactionAsync();
 
-        var oldInitiatorMedico = swap.InitiatorShift.MedicoTurnoId;
-        swap.InitiatorShift.MedicoTurnoId = counterpartId;
-        swap.InitiatorShift.UpdatedAtUtc = DateTime.UtcNow;
-        if (swap.InitiatorShift.Status == ShiftStatus.OnBoard)
-            swap.InitiatorShift.Status = ShiftStatus.Assigned;
-        _audit.Log("Shift", swap.InitiatorShift.Id, "Reassigned", swap.TenantId,
-            oldValues: new { MedicoTurnoId = oldInitiatorMedico },
-            newValues: new { MedicoTurnoId = counterpartId, SwapId = swap.Id });
-        _db.ShiftAssignmentHistories.Add(new ShiftAssignmentHistory
+        // Riassegna il turno iniziatore
+        if (swap.IsReperibile)
         {
-            TenantId = swap.TenantId,
-            ShiftId = swap.InitiatorShift.Id,
-            PreviousMedicoId = oldInitiatorMedico,
-            NewMedicoId = counterpartId,
-            Reason = swap.Type == SwapRequestType.Swap ? "Swap" : "Giveaway",
-            SwapRequestId = swap.Id,
-            AtUtc = DateTime.UtcNow,
-        });
-
-        if (swap.Type == SwapRequestType.Swap && swap.CounterpartShift is not null)
-        {
-            var oldCounterMedico = swap.CounterpartShift.MedicoTurnoId;
-            swap.CounterpartShift.MedicoTurnoId = initiatorId;
-            swap.CounterpartShift.UpdatedAtUtc = DateTime.UtcNow;
-            _audit.Log("Shift", swap.CounterpartShift.Id, "Reassigned", swap.TenantId,
-                oldValues: new { MedicoTurnoId = oldCounterMedico },
-                newValues: new { MedicoTurnoId = initiatorId, SwapId = swap.Id });
+            var oldInitiatorMedico = swap.InitiatorShift.MedicoReperibileId;
+            swap.InitiatorShift.MedicoReperibileId = counterpartId;
+            swap.InitiatorShift.UpdatedAtUtc = DateTime.UtcNow;
+            _audit.Log("Shift", swap.InitiatorShift.Id, "ReperibileReassigned", swap.TenantId,
+                oldValues: new { MedicoReperibileId = oldInitiatorMedico },
+                newValues: new { MedicoReperibileId = counterpartId, SwapId = swap.Id });
             _db.ShiftAssignmentHistories.Add(new ShiftAssignmentHistory
             {
                 TenantId = swap.TenantId,
-                ShiftId = swap.CounterpartShift.Id,
-                PreviousMedicoId = oldCounterMedico,
-                NewMedicoId = initiatorId,
-                Reason = "Swap",
+                ShiftId = swap.InitiatorShift.Id,
+                PreviousMedicoId = oldInitiatorMedico,
+                NewMedicoId = counterpartId,
+                Reason = (swap.Type == SwapRequestType.Swap ? "Swap" : "Giveaway") + " (Reperibilità)",
                 SwapRequestId = swap.Id,
                 AtUtc = DateTime.UtcNow,
             });
+        }
+        else
+        {
+            var oldInitiatorMedico = swap.InitiatorShift.MedicoTurnoId;
+            swap.InitiatorShift.MedicoTurnoId = counterpartId;
+            swap.InitiatorShift.UpdatedAtUtc = DateTime.UtcNow;
+            if (swap.InitiatorShift.Status == ShiftStatus.OnBoard)
+                swap.InitiatorShift.Status = ShiftStatus.Assigned;
+            _audit.Log("Shift", swap.InitiatorShift.Id, "Reassigned", swap.TenantId,
+                oldValues: new { MedicoTurnoId = oldInitiatorMedico },
+                newValues: new { MedicoTurnoId = counterpartId, SwapId = swap.Id });
+            _db.ShiftAssignmentHistories.Add(new ShiftAssignmentHistory
+            {
+                TenantId = swap.TenantId,
+                ShiftId = swap.InitiatorShift.Id,
+                PreviousMedicoId = oldInitiatorMedico,
+                NewMedicoId = counterpartId,
+                Reason = swap.Type == SwapRequestType.Swap ? "Swap" : "Giveaway",
+                SwapRequestId = swap.Id,
+                AtUtc = DateTime.UtcNow,
+            });
+        }
+
+        // Riassegna il turno controparte (solo per Swap)
+        if (swap.Type == SwapRequestType.Swap && swap.CounterpartShift is not null)
+        {
+            if (swap.IsReperibile)
+            {
+                var oldCounterMedico = swap.CounterpartShift.MedicoReperibileId;
+                swap.CounterpartShift.MedicoReperibileId = initiatorId;
+                swap.CounterpartShift.UpdatedAtUtc = DateTime.UtcNow;
+                _audit.Log("Shift", swap.CounterpartShift.Id, "ReperibileReassigned", swap.TenantId,
+                    oldValues: new { MedicoReperibileId = oldCounterMedico },
+                    newValues: new { MedicoReperibileId = initiatorId, SwapId = swap.Id });
+                _db.ShiftAssignmentHistories.Add(new ShiftAssignmentHistory
+                {
+                    TenantId = swap.TenantId,
+                    ShiftId = swap.CounterpartShift.Id,
+                    PreviousMedicoId = oldCounterMedico,
+                    NewMedicoId = initiatorId,
+                    Reason = "Swap (Reperibilità)",
+                    SwapRequestId = swap.Id,
+                    AtUtc = DateTime.UtcNow,
+                });
+            }
+            else
+            {
+                var oldCounterMedico = swap.CounterpartShift.MedicoTurnoId;
+                swap.CounterpartShift.MedicoTurnoId = initiatorId;
+                swap.CounterpartShift.UpdatedAtUtc = DateTime.UtcNow;
+                _audit.Log("Shift", swap.CounterpartShift.Id, "Reassigned", swap.TenantId,
+                    oldValues: new { MedicoTurnoId = oldCounterMedico },
+                    newValues: new { MedicoTurnoId = initiatorId, SwapId = swap.Id });
+                _db.ShiftAssignmentHistories.Add(new ShiftAssignmentHistory
+                {
+                    TenantId = swap.TenantId,
+                    ShiftId = swap.CounterpartShift.Id,
+                    PreviousMedicoId = oldCounterMedico,
+                    NewMedicoId = initiatorId,
+                    Reason = "Swap",
+                    SwapRequestId = swap.Id,
+                    AtUtc = DateTime.UtcNow,
+                });
+            }
         }
 
         swap.Status = SwapRequestStatus.AutoApproved;

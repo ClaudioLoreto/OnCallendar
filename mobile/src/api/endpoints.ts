@@ -49,6 +49,7 @@ export type ShiftDto = {
   medicoTurno: MedicoRefDto | null;
   medicoReperibile: MedicoRefDto | null;
   externalDoctor: ExternalDoctorRefDto | null;
+  externalDoctorReperibile: ExternalDoctorRefDto | null;
   isMineTurno: boolean;
   isMineReperibile: boolean;
   isPast: boolean;
@@ -100,6 +101,7 @@ export type SwapDto = {
   createdAtUtc: string;
   resolvedAtUtc: string | null;
   pendingCounterOffersCount: number;
+  isReperibile?: boolean;
 };
 
 // ---------- Notifications ----------
@@ -187,11 +189,11 @@ export const ShiftsApi = {
   all:  () => apiClient.get<ShiftDto[]>('/api/shifts').then(r => r.data),
   publish:   (id: string) => apiClient.post(`/api/shifts/${id}/publish-on-board`),
   unpublish: (id: string) => apiClient.post(`/api/shifts/${id}/unpublish`),
-  assignExternal: (id: string, firstName: string, lastName: string, phone?: string, email?: string) =>
-    apiClient.post<ShiftDto>(`/api/shifts/${id}/assign-external`, { firstName, lastName, phone, email })
+  assignExternal: (id: string, firstName: string, lastName: string, phone?: string, email?: string, isReperibile = false) =>
+    apiClient.post<ShiftDto>(`/api/shifts/${id}/assign-external`, { firstName, lastName, phone, email, isReperibile })
       .then(r => r.data),
-  clearExternal: (id: string) =>
-    apiClient.post<ShiftDto>(`/api/shifts/${id}/clear-external`).then(r => r.data),
+  clearExternal: (id: string, isReperibile = false) =>
+    apiClient.post<ShiftDto>(`/api/shifts/${id}/clear-external?isReperibile=${isReperibile}`).then(r => r.data),
 };
 
 export type ExternalDoctorDto = {
@@ -259,16 +261,16 @@ export const SwapsApi = {
   incoming: () => apiClient.get<SwapDto[]>('/api/swaps/incoming').then(r => r.data),
   outgoing: () => apiClient.get<SwapDto[]>('/api/swaps/outgoing').then(r => r.data),
   history:  () => apiClient.get<SwapDto[]>('/api/swaps/history').then(r => r.data),
-  giveaway: (shiftId: string, toMedicoId: string, message?: string) =>
-    apiClient.post<SwapDto>('/api/swaps/giveaway', { shiftId, toMedicoId, message }).then(r => r.data),
+  giveaway: (shiftId: string, toMedicoId: string, message?: string, isReperibile = false) =>
+    apiClient.post<SwapDto>('/api/swaps/giveaway', { shiftId, toMedicoId, message, isReperibile }).then(r => r.data),
   /** Cessione multi-destinatario: primo che accetta vince, gli altri vengono auto-cancellati. */
-  giveawayMulti: (shiftId: string, recipientIds: string[], message?: string) =>
-    apiClient.post<SwapDto[]>('/api/swaps/giveaway-multi', { shiftId, recipientIds, message }).then(r => r.data),
-  swap: (myShiftId: string, otherShiftId: string, message?: string) =>
-    apiClient.post<SwapDto>('/api/swaps/swap', { myShiftId, otherShiftId, message }).then(r => r.data),
+  giveawayMulti: (shiftId: string, recipientIds: string[], message?: string, isReperibile = false) =>
+    apiClient.post<SwapDto[]>('/api/swaps/giveaway-multi', { shiftId, recipientIds, message, isReperibile }).then(r => r.data),
+  swap: (myShiftId: string, otherShiftId: string, message?: string, isReperibile = false) =>
+    apiClient.post<SwapDto>('/api/swaps/swap', { myShiftId, otherShiftId, message, isReperibile }).then(r => r.data),
   /** Scambio multi-candidato: per ogni turno candidato dei colleghi viene creata una richiesta. */
-  swapMulti: (myShiftId: string, candidateShiftIds: string[], message?: string) =>
-    apiClient.post<SwapDto[]>('/api/swaps/swap-multi', { myShiftId, candidateShiftIds, message }).then(r => r.data),
+  swapMulti: (myShiftId: string, candidateShiftIds: string[], message?: string, isReperibile = false) =>
+    apiClient.post<SwapDto[]>('/api/swaps/swap-multi', { myShiftId, candidateShiftIds, message, isReperibile }).then(r => r.data),
   pick: (shiftId: string) =>
     apiClient.post<SwapDto>(`/api/swaps/pick/${shiftId}`).then(r => r.data),
   accept: (id: string, force = false) =>
@@ -297,6 +299,51 @@ export const NotificationsApi = {
     apiClient.get<NotificationPreferenceDto[]>('/api/notifications/preferences').then(r => r.data),
   setPreference: (type: string, channel: NotificationChannel, enabled: boolean) =>
     apiClient.put('/api/notifications/preferences', { type, channel, enabled }),
+};
+
+export const ReportsApi = {
+  /**
+   * Scarica Excel dello storico personale (filtrato per mese).
+   * Restituisce un Blob (file Excel).
+   */
+  downloadMyHistory: (year: number, month: number): Promise<Blob> =>
+    apiClient
+      .get(`/api/reports/my-history-excel?year=${year}&month=${month}`, { responseType: 'blob' })
+      .then(r => r.data as Blob),
+
+  /**
+   * Scarica Excel dello storico completo (tutti i turni, filtrato per mese).
+   * Restituisce un Blob (file Excel).
+   */
+  downloadAllHistory: (year: number, month: number): Promise<Blob> =>
+    apiClient
+      .get(`/api/reports/all-history-excel?year=${year}&month=${month}`, { responseType: 'blob' })
+      .then(r => r.data as Blob),
+};
+
+export type DashboardStats = {
+  year: number;
+  month: number;
+  totalShifts: number;
+  hoursWorked: number;
+  shiftsByCode: Record<string, number>;
+  estimatedSalary: number;
+  recentChanges: number;
+  onCallShifts: number;
+};
+
+export type MonthlyHoursData = {
+  year: number;
+  month: number;
+  daysInMonth: number;
+  hoursByDay: number[];
+};
+
+export const DashboardApi = {
+  stats: (year: number, month: number) =>
+    apiClient.get<DashboardStats>(`/api/dashboard/stats?year=${year}&month=${month}`).then(r => r.data),
+  monthlyHours: (year: number, month: number) =>
+    apiClient.get<MonthlyHoursData>(`/api/dashboard/monthly-hours?year=${year}&month=${month}`).then(r => r.data),
 };
 
 export const DeviceTokensApi = {

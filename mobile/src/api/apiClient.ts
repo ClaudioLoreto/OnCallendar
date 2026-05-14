@@ -74,6 +74,7 @@ let authToken: string | null = null;
 export const setAuthToken = (token: string | null) => {
   authToken = token;
 };
+export const getAuthToken = () => authToken;
 
 let onUnauthorized: (() => void | Promise<void>) | null = null;
 /** Registrato da AuthContext per fare auto-logout su 401. */

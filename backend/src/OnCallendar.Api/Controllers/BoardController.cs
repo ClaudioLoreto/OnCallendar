@@ -41,6 +41,7 @@ public sealed class BoardController : ControllerBase
             .Include(s => s.MedicoTurno)
             .Include(s => s.MedicoReperibile)
             .Include(s => s.ExternalDoctor)
+            .Include(s => s.ExternalDoctorReperibile)
             .Where(s => s.Status == ShiftStatus.OnBoard
                         && s.StartUtc > now
                         && s.Date <= monthEndLocal)

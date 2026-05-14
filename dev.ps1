@@ -1,4 +1,4 @@
-# OnCallendar Dev CLI
+﻿# OnCallendar Dev CLI
 # Uso: .\dev.ps1  (dalla root C:\Users\Clore\Sviluppo\OnCallendar)
 
 $ErrorActionPreference = "Stop"
@@ -522,9 +522,9 @@ function Deploy-RailwayCli {
     Write-Host "  [5/5] Verifica post-deploy..." -ForegroundColor Cyan
     try {
         $health = Invoke-RestMethod -Uri "$prodUrl/health" -TimeoutSec 10 -ErrorAction Stop
-        Write-Host "  /health: $($health.status) — $($health.time)" -ForegroundColor Green
+        Write-Host "  /health: $($health.status) - $($health.time)" -ForegroundColor Green
     } catch {
-        Write-Host "  /health FALLITO — il servizio potrebbe essere ancora in avvio" -ForegroundColor Red
+        Write-Host "  /health FALLITO - il servizio potrebbe essere ancora in avvio" -ForegroundColor Red
         Write-Host "  Riprova tra qualche minuto o controlla: railway logs" -ForegroundColor Yellow
         Wait-Key; return
     }

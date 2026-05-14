@@ -14,10 +14,10 @@ public interface ISwapService
     Task<ServiceResult<IReadOnlyList<SwapCounterOffer>>> GetCounterOffersAsync(Guid userId, Guid swapId);
 
     // ── Commands ──
-    Task<ServiceResult<SwapRequest>> CreateGiveawayAsync(Guid userId, Guid shiftId, Guid toMedicoId, string? message);
-    Task<ServiceResult<IReadOnlyList<SwapRequest>>> CreateMultiGiveawayAsync(Guid userId, Guid shiftId, List<Guid> recipientIds, string? message);
-    Task<ServiceResult<SwapRequest>> CreateSwapAsync(Guid userId, Guid myShiftId, Guid otherShiftId, string? message);
-    Task<ServiceResult<IReadOnlyList<SwapRequest>>> CreateMultiSwapAsync(Guid userId, Guid myShiftId, List<Guid> candidateShiftIds, string? message);
+    Task<ServiceResult<SwapRequest>> CreateGiveawayAsync(Guid userId, Guid shiftId, Guid toMedicoId, string? message, bool isReperibile = false);
+    Task<ServiceResult<IReadOnlyList<SwapRequest>>> CreateMultiGiveawayAsync(Guid userId, Guid shiftId, List<Guid> recipientIds, string? message, bool isReperibile = false);
+    Task<ServiceResult<SwapRequest>> CreateSwapAsync(Guid userId, Guid myShiftId, Guid otherShiftId, string? message, bool isReperibile = false);
+    Task<ServiceResult<IReadOnlyList<SwapRequest>>> CreateMultiSwapAsync(Guid userId, Guid myShiftId, List<Guid> candidateShiftIds, string? message, bool isReperibile = false);
     Task<ServiceResult<SwapRequest>> PickFromBoardAsync(Guid userId, Guid shiftId);
     Task<ServiceResult<SwapRequest>> AcceptAsync(Guid userId, Guid swapId, bool force);
     Task<ServiceResult<SwapRequest>> RejectAsync(Guid userId, Guid swapId, string? reason);

@@ -25,6 +25,7 @@ public static class ShiftDtos
         MedicoRefDto? MedicoTurno,
         MedicoRefDto? MedicoReperibile,
         ExternalDoctorRefDto? ExternalDoctor,
+        ExternalDoctorRefDto? ExternalDoctorReperibile,
         bool IsMineTurno,
         bool IsMineReperibile,
         bool IsPast);
@@ -51,6 +52,7 @@ public static class ShiftDtos
             MapMedico(s.MedicoTurno),
             MapMedico(s.MedicoReperibile),
             MapExternal(s.ExternalDoctor),
+            MapExternal(s.ExternalDoctorReperibile),
             IsMineTurno: s.MedicoTurnoId == currentUid,
             IsMineReperibile: s.MedicoReperibileId == currentUid,
             IsPast: s.EndUtc <= DateTime.UtcNow);
