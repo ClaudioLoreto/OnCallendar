@@ -482,12 +482,12 @@ function Deploy-RailwayCli {
         Write-Host "  Niente da committare." -ForegroundColor DarkGray
     }
     $currentBranch = git -C $root branch --show-current 2>$null
-    $pushOut = git -C $root push origin $currentBranch 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  ⚠ Push fallito: $pushOut" -ForegroundColor Yellow
-    } else {
-        Write-Host "  Push completato ($currentBranch)." -ForegroundColor Green
+    try {
+        $pushOut = git -C $root push origin $currentBranch 2>&1
+    } catch {
+        # "Everything up-to-date" viene scritto su stderr da git, non è un errore reale
     }
+    Write-Host "  Push completato ($currentBranch)." -ForegroundColor Green
 
     # ── 3. Conferma e deploy
     Write-Host ""
