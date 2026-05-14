@@ -482,8 +482,12 @@ function Deploy-RailwayCli {
         Write-Host "  Niente da committare." -ForegroundColor DarkGray
     }
     $currentBranch = git -C $root branch --show-current 2>$null
-    git -C $root push origin $currentBranch 2>&1 | Out-Null
-    Write-Host "  Push completato ($currentBranch)." -ForegroundColor Green
+    $pushOut = git -C $root push origin $currentBranch 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  ⚠ Push fallito: $pushOut" -ForegroundColor Yellow
+    } else {
+        Write-Host "  Push completato ($currentBranch)." -ForegroundColor Green
+    }
 
     # ── 3. Conferma e deploy
     Write-Host ""
